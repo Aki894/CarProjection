@@ -57,7 +57,6 @@ jobs:
           java -version
           ./gradlew --version
           echo "ANDROID_HOME=$ANDROID_HOME"
-          sdkmanager --list_installed
 
       - name: Build debug APK
         run: |
