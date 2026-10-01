@@ -16,10 +16,13 @@ public class ForgroundService extends AccessibilityService {
 
     public static volatile ForgroundService mService;
 
+    private RemoteCursorController remoteCursorController;
+
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
         mService = this;
+        remoteCursorController = new RemoteCursorController(this);
         log("car control accessibility service connected");
     }
 
@@ -34,6 +37,24 @@ public class ForgroundService extends AccessibilityService {
         }
     }
 
+    public void onCarPadMove(int dx, int dy) {
+        if (remoteCursorController != null) {
+            remoteCursorController.moveBy(dx, dy);
+        }
+    }
+
+    public void onCarOk() {
+        if (remoteCursorController != null) {
+            remoteCursorController.click();
+        }
+    }
+
+    public void hideCarCursor() {
+        if (remoteCursorController != null) {
+            remoteCursorController.hide();
+        }
+    }
+
     @Override
     public void onInterrupt() {
         log("car control accessibility service interrupted");
@@ -42,6 +63,10 @@ public class ForgroundService extends AccessibilityService {
     @Override
     public void onDestroy() {
         mService = null;
+        if (remoteCursorController != null) {
+            remoteCursorController.destroy();
+            remoteCursorController = null;
+        }
         BrightnessController.restoreIfNeeded(this);
         log("car control accessibility service destroyed");
         super.onDestroy();
