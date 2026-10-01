@@ -260,10 +260,67 @@ public class MainActivity extends AppCompatActivity {
                                         : id
                         );
                     }
+
+                    @Override
+                    public void onAudioFeatures(
+                            Integer audioTransmissionMode,
+                            Integer mediaSampleRate
+                    ) {
+                        if (audioTransmissionMode == null
+                                && mediaSampleRate == null) {
+                            binding.audioHuStatusValue.setText(
+                                    R.string.audio_hu_waiting
+                            );
+                            return;
+                        }
+
+                        String modeText;
+                        if (audioTransmissionMode == null) {
+                            modeText = "AudioPath=?";
+                        } else if (audioTransmissionMode == 0) {
+                            modeText = "AudioPath=CarLife USB (0)";
+                        } else if (audioTransmissionMode == 1) {
+                            modeText = "AudioPath=Bluetooth (1)";
+                        } else {
+                            modeText = "AudioPath="
+                                    + audioTransmissionMode;
+                        }
+
+                        String sampleText;
+                        if (mediaSampleRate == null) {
+                            sampleText = "MediaRate=?";
+                        } else if (mediaSampleRate == 1) {
+                            sampleText = "MediaRate=48 kHz (1)";
+                        } else if (mediaSampleRate == 0) {
+                            sampleText = "MediaRate=system (0)";
+                        } else {
+                            sampleText = "MediaRate="
+                                    + mediaSampleRate;
+                        }
+
+                        binding.audioHuStatusValue.setText(
+                                modeText + " · " + sampleText
+                        );
+                    }
                 }
         );
 
         binding.saveButton.setOnClickListener(v -> saveVideoSettings());
+        binding.audioTestToneButton.setOnClickListener(v -> {
+            if (msgProcess != null && msgProcess.playAudioTestTone()) {
+                Toast.makeText(
+                        this,
+                        R.string.audio_test_started,
+                        Toast.LENGTH_SHORT
+                ).show();
+            } else {
+                Snackbar.make(
+                        binding.getRoot(),
+                        R.string.audio_test_not_connected,
+                        Snackbar.LENGTH_LONG
+                ).show();
+            }
+        });
         binding.accessibilityButton.setOnClickListener(v ->
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         );
@@ -448,6 +505,7 @@ public class MainActivity extends AppCompatActivity {
         binding.statusDetail.setText(R.string.auto_connect_hint);
         binding.resolutionValue.setText(R.string.resolution_unknown);
         binding.headUnitIdValue.setText(R.string.head_unit_unknown);
+        binding.audioHuStatusValue.setText(R.string.audio_hu_waiting);
     }
 
     private void closeAccessory() {
@@ -621,7 +679,7 @@ public class MainActivity extends AppCompatActivity {
                     .getPackageInfo(getPackageName(), 0)
                     .versionName;
         } catch (PackageManager.NameNotFoundException e) {
-            return "0.2.4";
+            return "0.2.5";
         }
     }
 
