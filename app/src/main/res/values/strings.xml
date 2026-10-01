@@ -21,6 +21,10 @@
     <string name="head_unit_id">车机 ID</string>
     <string name="auto_connect_hint">连接支持 CarLife 的 USB 口后，应用会自动完成协议握手。车机请求视频时，Android 会弹出系统屏幕录制授权。</string>
     <string name="audio_permission_denied">未授予录音权限：视频投屏仍可用，但系统音频捕获可能不可用。</string>
+    <string name="runtime_log">实时日志</string>
+    <string name="runtime_log_hint">用于真车调试 CarLife 输入；最多保留最近 300 条。</string>
+    <string name="input_only">只看输入事件</string>
+    <string name="clear_log">清空日志</string>
     <string name="version_format">CarProjection %1$s · Android 10+</string>
     <string name="car_control">车机反控与屏幕节能</string>
     <string name="accessibility_des">允许 CarProjection 将 CarLife 车机输入转换为 Android 手势，并检测手机触摸以恢复屏幕亮度。</string>
