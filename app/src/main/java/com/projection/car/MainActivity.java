@@ -399,21 +399,21 @@ public class MainActivity extends AppCompatActivity {
                 ).show();
             }
         });
-        binding.audioTestToneButton.setOnClickListener(v -> {
-            if (msgProcess != null && msgProcess.playAudioTestTone()) {
-                Toast.makeText(
-                        this,
-                        R.string.audio_test_started,
-                        Toast.LENGTH_SHORT
-                ).show();
-            } else {
-                Snackbar.make(
-                        binding.getRoot(),
-                        R.string.audio_test_not_connected,
-                        Snackbar.LENGTH_LONG
-                ).show();
-            }
-        });
+        binding.audioTestToneButton.setOnClickListener(v ->
+                runAudioTest(
+                        msgProcess != null && msgProcess.playAudioTestTone()
+                )
+        );
+        binding.audioTest44kButton.setOnClickListener(v ->
+                runAudioTest(
+                        msgProcess != null && msgProcess.playAudioTestTone44k()
+                )
+        );
+        binding.audioTestTtsButton.setOnClickListener(v ->
+                runAudioTest(
+                        msgProcess != null && msgProcess.playTtsTestTone()
+                )
+        );
         binding.accessibilityButton.setOnClickListener(v ->
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         );
@@ -758,6 +758,22 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 
+    private void runAudioTest(boolean started) {
+        if (started) {
+            Toast.makeText(
+                    this,
+                    R.string.audio_test_started,
+                    Toast.LENGTH_SHORT
+            ).show();
+        } else {
+            Snackbar.make(
+                    binding.getRoot(),
+                    R.string.audio_test_not_connected,
+                    Snackbar.LENGTH_LONG
+            ).show();
+        }
+    }
+
     private void requestWriteSettingsPermission() {
         if (BrightnessController.canWriteSettings(this)) {
             return;
@@ -776,7 +792,7 @@ public class MainActivity extends AppCompatActivity {
                     .getPackageInfo(getPackageName(), 0)
                     .versionName;
         } catch (PackageManager.NameNotFoundException e) {
-            return "0.2.9";
+            return "0.3.0";
         }
     }
 
