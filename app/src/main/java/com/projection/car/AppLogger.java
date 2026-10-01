@@ -68,7 +68,8 @@ public final class AppLogger {
                 if (!inputOnly
                         || line.contains("[TOUCH]")
                         || line.contains("[KEY]")
-                        || line.contains("[PAD]")) {
+                        || line.contains("[PAD]")
+                        || line.contains("[PAD-GESTURE]")) {
                     result.add(line);
                 }
             }
