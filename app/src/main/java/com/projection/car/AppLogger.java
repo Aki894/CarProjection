@@ -69,7 +69,8 @@ public final class AppLogger {
                         || line.contains("[TOUCH]")
                         || line.contains("[KEY]")
                         || line.contains("[PAD]")
-                        || line.contains("[PAD-GESTURE]")) {
+                        || line.contains("[PAD-GESTURE]")
+                        || line.contains("[FOCUS]")) {
                     result.add(line);
                 }
             }
