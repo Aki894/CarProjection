@@ -20,6 +20,8 @@
     <string name="audio_hu_status">车机音频协商</string>
     <string name="audio_hu_waiting">等待车机返回 Audio Feature</string>
     <string name="audio_hu_unknown">HU 未返回 AUDIO_TRANSMISSION_MODE / MEDIA_SAMPLE_RATE</string>
+    <string name="audio_module_status">音乐模块控制</string>
+    <string name="audio_module_waiting">尚未收到 HU MODULE_CONTROL</string>
     <string name="audio_test_tone">播放 2 秒 CarLife 测试音</string>
     <string name="audio_test_tone_summary">直接生成 1 kHz / 48 kHz / 双声道 PCM16，不经过 Android PlaybackCapture，用于验证 USB MEDIA 链路。</string>
     <string name="audio_test_not_connected">请先连接 CarLife 车机</string>
