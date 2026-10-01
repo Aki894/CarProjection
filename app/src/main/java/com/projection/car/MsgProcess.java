@@ -137,6 +137,9 @@ public class MsgProcess {
     private int mVideoBit = 0;
     private int mVideoFrame = 0;
     private boolean mCarLifeMediaAudioEnabled = true;
+    private volatile boolean mAudioTestToneActive;
+    private Integer mHuAudioTransmissionMode;
+    private Integer mHuMediaSampleRate;
     private InfoListener mInfoListener;
 
     MsgProcess(Activity context, int bit, int frame, InfoListener infoListener) {
@@ -184,6 +187,9 @@ public class MsgProcess {
 
     public void startProjection(FileInputStream in, FileOutputStream out) {
         log("startProjection");
+        mHuAudioTransmissionMode = null;
+        mHuMediaSampleRate = null;
+        notifyAudioFeatureStatus();
         usbOk = true;
         mInputStream = in;
         mOutputStream = out;
@@ -239,6 +245,34 @@ public class MsgProcess {
         if (!enabled) {
             mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_STOP);
         }
+    }
+
+    public boolean playAudioTestTone() {
+        if (!usbOk || mOutputStream == null) {
+            log("[AUDIO-TEST] rejected: CarLife is not connected");
+            return false;
+        }
+        if (mAudioTestToneActive) {
+            log("[AUDIO-TEST] already running");
+            return false;
+        }
+        mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_TEST_TONE);
+        return true;
+    }
+
+    private void notifyAudioFeatureStatus() {
+        if (mInfoListener == null) {
+            return;
+        }
+
+        final Integer mode = mHuAudioTransmissionMode;
+        final Integer sampleRate = mHuMediaSampleRate;
+        mMainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                mInfoListener.onAudioFeatures(mode, sampleRate);
+            }
+        });
     }
 
 
@@ -367,6 +401,7 @@ public class MsgProcess {
         public static final int AUDIO_START = 0;
         public static final int AUDIO_READ = 1;
         public static final int AUDIO_STOP = 3;
+        public static final int AUDIO_TEST_TONE = 4;
 
         private AudioRecord mAudioRecord;
         private boolean mAudioStart;
@@ -512,20 +547,105 @@ public class MsgProcess {
 
                     break;
                 case AUDIO_STOP:
-                    try {
-                        if (mAudioStart) {
-                            mAudioRecord.stop();
-                            mAudioStart = false;
-                        }
-
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                        mAudioStart = false;
-                    }
+                    stopCapture();
+                    break;
+                case AUDIO_TEST_TONE:
+                    runCarLifeTestTone();
                     break;
             }
 
         }
+
+        private void stopCapture() {
+            removeMessages(AUDIO_READ);
+            try {
+                if (mAudioRecord != null) {
+                    if (mAudioStart) {
+                        mAudioRecord.stop();
+                    }
+                    mAudioRecord.release();
+                }
+            } catch (Exception e) {
+                log("[AUDIO] stop capture error: " + e);
+            } finally {
+                mAudioRecord = null;
+                mAudioStart = false;
+            }
+        }
+
+        private void runCarLifeTestTone() {
+            if (!usbOk || mOutputStream == null || mAudioTestToneActive) {
+                return;
+            }
+
+            boolean restartCapture = mAudioStart;
+            mAudioTestToneActive = true;
+            stopCapture();
+
+            try {
+                sendMediaInitPacket();
+
+                final int sampleRate = 48000;
+                final int frequency = 1000;
+                final int framesPerPacket = 960; // 20 ms
+                final int packetCount = 100;     // 2 seconds
+                final int amplitude = 6500;      // ~20% full scale
+
+                long sampleIndex = 0;
+                log("[AUDIO-TEST] START 1kHz 48kHz stereo PCM16 duration=2s");
+
+                for (int packet = 0; packet < packetCount && usbOk; packet++) {
+                    byte[] pcm = new byte[framesPerPacket * 4];
+                    int offset = 0;
+
+                    for (int frame = 0; frame < framesPerPacket; frame++) {
+                        double phase = 2.0 * Math.PI * frequency
+                                * sampleIndex / sampleRate;
+                        short value = (short) Math.round(
+                                Math.sin(phase) * amplitude
+                        );
+                        sampleIndex++;
+
+                        pcm[offset++] = (byte) (value & 0xFF);
+                        pcm[offset++] = (byte) ((value >> 8) & 0xFF);
+                        pcm[offset++] = (byte) (value & 0xFF);
+                        pcm[offset++] = (byte) ((value >> 8) & 0xFF);
+                    }
+
+                    enqueueMediaPacket(MSG_MEDIA_DATA, pcm, pcm.length);
+                    SystemClock.sleep(20);
+                }
+
+                log("[AUDIO-TEST] END");
+            } catch (Exception e) {
+                log("[AUDIO-TEST] failed: " + e);
+            } finally {
+                mAudioTestToneActive = false;
+                if (restartCapture && mCarLifeMediaAudioEnabled && usbOk) {
+                    sendEmptyMessage(AUDIO_START);
+                }
+            }
+        }
+    }
+
+    private void sendMediaInitPacket() {
+        CarlifeMusicInitProto.CarlifeMusicInit.Builder builder =
+                CarlifeMusicInitProto.CarlifeMusicInit.newBuilder();
+        builder.setSampleRate(48000);
+        builder.setChannelConfig(2);
+        builder.setSampleFormat(16);
+        byte[] init = builder.build().toByteArray();
+        enqueueMediaPacket(MSG_MEDIA_INIT, init, init.length);
+        log("[AUDIO] MEDIA_INIT sent 48000Hz channelConfig=2 sampleFormat=16");
+    }
+
+    private void enqueueMediaPacket(int serviceType, byte[] data, int length) {
+        byte[] carLifeMsg = exportVideoMsg(serviceType, data, length);
+        byte[] headmsg = new byte[8];
+        headmsg[3] = MEDIA;
+        intToBytes2(carLifeMsg.length, headmsg, 4);
+        CarMsg carMsg = new CarMsg(headmsg, carLifeMsg);
+        mUsbWriteHandler.obtainMessage(MSG_WRITE_AUDIO, carMsg).sendToTarget();
     }
 
     private void startUsbTransferThread() {
@@ -661,6 +781,8 @@ public class MsgProcess {
                                                     CarlifeFeatureConfigListProto.CarlifeFeatureConfigList response =
                                                             CarlifeFeatureConfigListProto.CarlifeFeatureConfigList.parseFrom(msgdata);
                                                     log("[FEATURE] HU response cnt=" + response.getCnt());
+                                                    mHuAudioTransmissionMode = null;
+                                                    mHuMediaSampleRate = null;
                                                     for (CarlifeFeatureConfigProto.CarlifeFeatureConfig feature
                                                             : response.getFeatureConfigList()) {
                                                         log(
@@ -669,7 +791,13 @@ public class MsgProcess {
                                                                         + "="
                                                                         + feature.getValue()
                                                         );
+                                                        if ("AUDIO_TRANSMISSION_MODE".equals(feature.getKey())) {
+                                                            mHuAudioTransmissionMode = feature.getValue();
+                                                        } else if ("MEDIA_SAMPLE_RATE".equals(feature.getKey())) {
+                                                            mHuMediaSampleRate = feature.getValue();
+                                                        }
                                                     }
+                                                    notifyAudioFeatureStatus();
                                                 } catch (Exception e) {
                                                     log("[FEATURE] response parse error: " + e);
                                                 }
@@ -926,24 +1054,7 @@ public class MsgProcess {
                             log("now start MSG_CMD_VIDEO_ENCODER_START");
 
                             if (mCarLifeMediaAudioEnabled) {
-                                CarlifeMusicInitProto.CarlifeMusicInit.Builder builder =
-                                        CarlifeMusicInitProto.CarlifeMusicInit.newBuilder();
-                                builder.setSampleRate(48000);
-                                builder.setChannelConfig(2);
-                                builder.setSampleFormat(16);
-                                byte[] carLifeMsg = exportVideoMsg(
-                                        MSG_MEDIA_INIT,
-                                        builder.build().toByteArray()
-                                );
-                                byte[] headmsg = new byte[8];
-                                headmsg[3] = MEDIA;
-                                intToBytes2(carLifeMsg.length, headmsg, 4);
-                                mOutputStream.write(headmsg);
-                                mOutputStream.write(carLifeMsg);
-                                log(
-                                        "[AUDIO] MEDIA_INIT sent 48000Hz"
-                                                + " channelConfig=2 sampleFormat=16"
-                                );
+                                sendMediaInitPacket();
                             } else {
                                 log("[AUDIO] MEDIA_INIT skipped; Bluetooth media mode requested");
                             }
@@ -988,6 +1099,8 @@ public class MsgProcess {
         void onVISSize(int x, int y);
 
         void onVISID(String id);
+
+        void onAudioFeatures(Integer audioTransmissionMode, Integer mediaSampleRate);
     }
 
     static class CarMsg {
