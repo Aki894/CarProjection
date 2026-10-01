@@ -1049,9 +1049,28 @@ public class MsgProcess {
                                                 } catch (InvalidProtocolBufferException e) {
                                                     e.printStackTrace();
                                                 }
-                                                CarlifeAuthenResultProto.CarlifeAuthenResult.Builder builder = CarlifeAuthenResultProto.CarlifeAuthenResult.newBuilder();
+                                                log("[SESSION] STATISTIC_INFO -> FOREGROUND -> SCREEN_ON -> AUTHEN_RESULT");
+
+                                                mUsbWriteHandler.obtainMessage(
+                                                        MSG_CMD_FOREGROUND,
+                                                        exportCMDMsg(MSG_CMD_FOREGROUND, null)
+                                                ).sendToTarget();
+
+                                                mUsbWriteHandler.obtainMessage(
+                                                        MSG_CMD_SCREEN_ON,
+                                                        exportCMDMsg(MSG_CMD_SCREEN_ON, null)
+                                                ).sendToTarget();
+
+                                                CarlifeAuthenResultProto.CarlifeAuthenResult.Builder builder =
+                                                        CarlifeAuthenResultProto.CarlifeAuthenResult.newBuilder();
                                                 builder.setResult(true);
-                                                mUsbWriteHandler.obtainMessage(MSG_CMD_MD_AUTHEN_RESULT, exportCMDMsg(MSG_CMD_MD_AUTHEN_RESULT, builder.build().toByteArray())).sendToTarget();
+                                                mUsbWriteHandler.obtainMessage(
+                                                        MSG_CMD_MD_AUTHEN_RESULT,
+                                                        exportCMDMsg(
+                                                                MSG_CMD_MD_AUTHEN_RESULT,
+                                                                builder.build().toByteArray()
+                                                        )
+                                                ).sendToTarget();
                                             }
                                             break;
 
@@ -1230,6 +1249,8 @@ public class MsgProcess {
                     switch (msg.what) {
                         case MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS:
                         case MSG_CMD_MD_INFO:
+                        case MSG_CMD_FOREGROUND:
+                        case MSG_CMD_SCREEN_ON:
                         case MSG_CMD_MD_AUTHEN_RESULT:
                         case MSG_CMD_MD_FEATURE_CONFIG_REQUEST:
                         case MSG_CMD_MD_RSA_PUBLIC_KEY_REQUEST: {
