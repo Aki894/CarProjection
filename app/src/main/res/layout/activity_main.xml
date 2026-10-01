@@ -246,6 +246,23 @@
                         android:textAppearance="?attr/textAppearanceBodyMedium"
                         android:textIsSelectable="true" />
 
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:text="@string/audio_module_status"
+                        android:textAppearance="?attr/textAppearanceLabelLarge"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/audioModuleStatusValue"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/audio_module_waiting"
+                        android:textAppearance="?attr/textAppearanceBodyMedium"
+                        android:textIsSelectable="true" />
+
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/audioTestToneButton"
                         style="@style/Widget.Material3.Button.OutlinedButton"
