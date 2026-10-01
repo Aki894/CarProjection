@@ -108,6 +108,11 @@ public class MsgProcess {
 
 
     private volatile boolean usbOk;
+    private volatile int mUsbGeneration;
+    private volatile boolean mReleased;
+    private HandlerThread mAudioThread;
+    private HandlerThread mUsbReadThread;
+    private HandlerThread mUsbWriteThread;
     private FileInputStream mInputStream;
     private FileOutputStream mOutputStream;
     private Activity mContext;
@@ -144,13 +149,14 @@ public class MsgProcess {
     private float mLandscapeScreenVISGestureFactorH = 1.0f;
 
     private float mLeft_x;
-    private Handler mMainHandler = new Handler();
+    private Handler mMainHandler = new Handler(Looper.getMainLooper());
 
     private int mVideoBit = 0;
     private int mVideoFrame = 0;
     private volatile boolean mCarLifeMediaAudioEnabled = true;
     private volatile boolean mTtsAudioCompatibilityEnabled;
     private volatile boolean mAudioTestToneActive;
+    private volatile boolean mCancelAudioTest;
     private Integer mHuAudioTransmissionMode;
     private Integer mHuMediaSampleRate;
     private Integer mHuContentEncryption;
@@ -172,9 +178,9 @@ public class MsgProcess {
 
         mMediaCodecTool = new MediaCodecTool();
 
-        HandlerThread audioThread = new HandlerThread("audio");
-        audioThread.start();
-        mAudioReadHandler = new AudioHandler(audioThread.getLooper());
+        mAudioThread = new HandlerThread("audio");
+        mAudioThread.start();
+        mAudioReadHandler = new AudioHandler(mAudioThread.getLooper());
 
 
         startUsbTransferThread();
@@ -188,6 +194,7 @@ public class MsgProcess {
     private Runnable runnable = new Runnable() {
         @Override
         public void run() {
+                if (mReleased || mInfoListener == null) return;
 
             mInputStream = null;
             mOutputStream = null;
@@ -197,12 +204,15 @@ public class MsgProcess {
     private Runnable runnable_toast = new Runnable() {
         @Override
         public void run() {
+                if (mReleased || mInfoListener == null) return;
 
             Toast.makeText(mContext, "当前版本未授权,稍后自动断连", Toast.LENGTH_LONG).show();
         }
     };
 
-    public void startProjection(FileInputStream in, FileOutputStream out) {
+    public synchronized void startProjection(FileInputStream in, FileOutputStream out) {
+        if (mReleased) return;
+        final int generation = ++mUsbGeneration;
         log("startProjection");
         mHuAudioTransmissionMode = null;
         mHuMediaSampleRate = null;
@@ -211,7 +221,7 @@ public class MsgProcess {
         usbOk = true;
         mInputStream = in;
         mOutputStream = out;
-        mUsbReadHandler.sendEmptyMessage(0);
+        mUsbReadHandler.obtainMessage(0, generation, 0).sendToTarget();
 
     }
 
@@ -232,6 +242,7 @@ public class MsgProcess {
 
                     @Override
                     public void onProjectionStopped() {
+                        mCancelAudioTest = true;
                         mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_STOP);
                     }
                 }
@@ -239,9 +250,11 @@ public class MsgProcess {
     }
 
     public synchronized void resetUsb() {
+        mCancelAudioTest = true;
         if (usbOk) {
             log("resetUsb");
             usbOk = false;
+            mUsbGeneration++;
             mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_STOP);
             mMediaCodecTool.stopProjection();
             mUsbWriteHandler.removeCallbacksAndMessages(null);
@@ -251,6 +264,17 @@ public class MsgProcess {
             }
         }
 
+    }
+
+    public void release() {
+        mReleased = true;
+        resetUsb();
+        mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_STOP);
+        mMainHandler.removeCallbacksAndMessages(null);
+        mInfoListener = null;
+        mAudioThread.quitSafely();
+        mUsbReadThread.quitSafely();
+        mUsbWriteThread.quitSafely();
     }
 
     public void startReadAudio() {
@@ -268,12 +292,14 @@ public class MsgProcess {
     }
 
     public void updateCarLifeMediaAudioEnabled(boolean enabled) {
+        mCancelAudioTest = true;
         mCarLifeMediaAudioEnabled = enabled;
         log("[AUDIO] USB media setting=" + enabled + " (reconnect to renegotiate)");
         mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_RECONFIGURE);
     }
 
     public void updateTtsAudioCompatibilityEnabled(boolean enabled) {
+        mCancelAudioTest = true;
         mTtsAudioCompatibilityEnabled = enabled;
         log("[TTS-AUDIO] compatibility=" + enabled + " (reconnect to renegotiate)");
         mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_RECONFIGURE);
@@ -297,6 +323,7 @@ public class MsgProcess {
         mMainHandler.postDelayed(new Runnable() {
             @Override
             public void run() {
+                if (mReleased || mInfoListener == null) return;
                 if (generation == mEncryptionProbeGeneration) {
                     log("[ENCRYPT] RSA probe timeout");
                     notifyEncryptionProbe(-1, 0);
@@ -319,7 +346,7 @@ public class MsgProcess {
         return startAudioTest(AudioHandler.AUDIO_TEST_TTS_16K);
     }
 
-    private boolean startAudioTest(int what) {
+    private synchronized boolean startAudioTest(int what) {
         if (mTtsAudioCompatibilityEnabled && what != AudioHandler.AUDIO_TEST_TTS_16K) {
             log("[AUDIO-TEST] MEDIA test disabled in TTS compatibility mode");
             return false;
@@ -332,6 +359,8 @@ public class MsgProcess {
             log("[AUDIO-TEST] already running");
             return false;
         }
+        mCancelAudioTest = false;
+        mAudioTestToneActive = true;
         mAudioReadHandler.sendEmptyMessage(what);
         return true;
     }
@@ -347,6 +376,7 @@ public class MsgProcess {
         mMainHandler.post(new Runnable() {
             @Override
             public void run() {
+                if (mReleased || mInfoListener == null) return;
                 mInfoListener.onAudioFeatures(mode, sampleRate, contentEncryption);
             }
         });
@@ -359,6 +389,7 @@ public class MsgProcess {
         mMainHandler.post(new Runnable() {
             @Override
             public void run() {
+                if (mReleased || mInfoListener == null) return;
                 mInfoListener.onEncryptionProbe(state, keyLength);
             }
         });
@@ -371,6 +402,7 @@ public class MsgProcess {
         mMainHandler.post(new Runnable() {
             @Override
             public void run() {
+                if (mReleased || mInfoListener == null) return;
                 mInfoListener.onModuleControl(moduleId, statusId);
             }
         });
@@ -380,6 +412,7 @@ public class MsgProcess {
     private MediaCodecTool.VideoDataEncodeListener videoDataEncodeListener = new MediaCodecTool.VideoDataEncodeListener() {
         @Override
         public void onData(byte[] data) {
+            if (!usbOk || mReleased) return;
             try {
 //                                        log("data len = " + data.length);
                 byte[] carLifeMsg = exportVideoMsg(MSG_VIDEO_DATA, data);
@@ -400,6 +433,7 @@ public class MsgProcess {
         mMainHandler.post(new Runnable() {
             @Override
             public void run() {
+                if (mReleased || mInfoListener == null) return;
                 mInfoListener.onVISSize((int) mVISWidth, (int) mVISHeight);
 
             }
@@ -546,6 +580,10 @@ public class MsgProcess {
                     break;
                 case AUDIO_STOP:
                     removeMessages(AUDIO_START);
+                    removeMessages(AUDIO_TEST_MEDIA_48K);
+                    removeMessages(AUDIO_TEST_MEDIA_44K);
+                    removeMessages(AUDIO_TEST_TTS_16K);
+                    mAudioTestToneActive = false;
                     stopCapture();
                     break;
                 case AUDIO_RECONFIGURE:
@@ -556,9 +594,11 @@ public class MsgProcess {
                     break;
                 case AUDIO_TEST_MEDIA_48K:
                     if (!mTtsAudioCompatibilityEnabled) runMediaTestTone(48000);
+                    else mAudioTestToneActive = false;
                     break;
                 case AUDIO_TEST_MEDIA_44K:
                     if (!mTtsAudioCompatibilityEnabled) runMediaTestTone(44100);
+                    else mAudioTestToneActive = false;
                     break;
                 case AUDIO_TEST_TTS_16K:
                     runTtsTestTone();
@@ -749,7 +789,8 @@ public class MsgProcess {
         }
 
         private void runMediaTestTone(int sampleRate) {
-            if (!usbOk || mOutputStream == null || mAudioTestToneActive) {
+            if (!usbOk || mOutputStream == null || mCancelAudioTest || mReleased) {
+                mAudioTestToneActive = false;
                 return;
             }
 
@@ -772,7 +813,7 @@ public class MsgProcess {
                                 + "Hz stereo PCM16 duration=2s"
                 );
 
-                for (int packet = 0; packet < packetCount && usbOk; packet++) {
+                for (int packet = 0; packet < packetCount && usbOk && !mReleased && !mCancelAudioTest; packet++) {
                     byte[] pcm = new byte[framesPerPacket * 4];
                     int offset = 0;
 
@@ -798,15 +839,17 @@ public class MsgProcess {
             } catch (Exception e) {
                 log("[AUDIO-TEST] MEDIA failed: " + e);
             } finally {
+                enqueueMediaPacket(Utils.MSG_MEDIA_STOP, new byte[0], 0);
                 mAudioTestToneActive = false;
-                if (restartCapture && isUsbAudioEnabled() && usbOk) {
+                if (restartCapture && isUsbAudioEnabled() && usbOk && !mCancelAudioTest) {
                     sendEmptyMessage(AUDIO_START);
                 }
             }
         }
 
         private void runTtsTestTone() {
-            if (!usbOk || mOutputStream == null || mAudioTestToneActive) {
+            if (!usbOk || mOutputStream == null || mCancelAudioTest || mReleased) {
+                mAudioTestToneActive = false;
                 return;
             }
 
@@ -826,7 +869,7 @@ public class MsgProcess {
                 long sampleIndex = 0;
                 log("[AUDIO-TEST] TTS START 1kHz 16kHz mono PCM16 duration=2s");
 
-                for (int packet = 0; packet < packetCount && usbOk; packet++) {
+                for (int packet = 0; packet < packetCount && usbOk && !mReleased && !mCancelAudioTest; packet++) {
                     byte[] pcm = new byte[framesPerPacket * 2];
                     int offset = 0;
 
@@ -857,7 +900,7 @@ public class MsgProcess {
                 enqueueAudioPacket(TTS, MSG_NAVI_TTS_END, new byte[0], 0);
                 log("[AUDIO-TEST] TTS END");
                 mAudioTestToneActive = false;
-                if (restartCapture && isUsbAudioEnabled() && usbOk) {
+                if (restartCapture && isUsbAudioEnabled() && usbOk && !mCancelAudioTest) {
                     sendEmptyMessage(AUDIO_START);
                 }
             }
@@ -905,7 +948,7 @@ public class MsgProcess {
         return enqueueAudioPacket(channel, serviceType, data, length, null);
     }
 
-    private boolean enqueueAudioPacket(byte channel, int serviceType, byte[] data,
+    private synchronized boolean enqueueAudioPacket(byte channel, int serviceType, byte[] data,
                                        int length, AudioWriteStats stats) {
         if (!usbOk || mOutputStream == null) return false;
         boolean isData = serviceType == MSG_MEDIA_DATA || serviceType == MSG_NAVI_TTS_DATA;
@@ -925,9 +968,9 @@ public class MsgProcess {
     }
 
     private void startUsbTransferThread() {
-        HandlerThread inthread = new HandlerThread("read");
-        inthread.start();
-        mUsbReadHandler = new Handler(inthread.getLooper()) {
+        mUsbReadThread = new HandlerThread("read");
+        mUsbReadThread.start();
+        mUsbReadHandler = new Handler(mUsbReadThread.getLooper()) {
             @Override
             public void handleMessage(@NonNull Message msg) {
                 super.handleMessage(msg);
@@ -935,21 +978,30 @@ public class MsgProcess {
                     case 0: {
 //                        mMainHandler.postDelayed(runnable_toast,300000 - 3000);
 //                        mMainHandler.postDelayed(runnable,300000);
-                        while (usbOk) {
+                        final int generation = msg.arg1;
+                        final FileInputStream input = mInputStream;
+                        while (usbOk && !mReleased && generation == mUsbGeneration) {
                             try {
                                 byte[] data = new byte[8];
-                                int len = mInputStream.read(data);
+                                CarLifeFrameReader.readFully(input, data);
+                                int len = data.length;
 
                                 if (len == 8) {
                                     int msg_type = data[3];
                                     log("msg_type = " + msg_type + ", read data = " + Arrays.toString(data));
                                     int msgLen = bytesToInt2(data, 4);
                                     log("msgLen = " + msgLen);
+                                    CarLifeFrameReader.checkPayloadLength(msgLen);
                                     byte[] msgdata = new byte[msgLen];
-                                    len = mInputStream.read(msgdata);
+                                    CarLifeFrameReader.readFully(input, msgdata);
+                                    if (generation != mUsbGeneration || !usbOk) break;
+                                    len = msgdata.length;
                                     log("read data = " + Arrays.toString(msgdata));
                                     log("read msg data = " + len + " msgLen " + msgLen);
-                                    short carmsgLen = bytesToShort2(msgdata, 0);
+                                    int carmsgLen = bytesToShort2(msgdata, 0) & 0xffff;
+                                    if (carmsgLen > msgdata.length - 8) {
+                                        throw new IOException("invalid CarLife command payload length " + carmsgLen);
+                                    }
                                     int type = bytesToInt2(msgdata, 4);
                                     log("read carmsgLen data = " + carmsgLen + " type " + type);
                                     byte[] carmsg = new byte[carmsgLen];
@@ -1139,6 +1191,7 @@ public class MsgProcess {
                                                     mMainHandler.post(new Runnable() {
                                                         @Override
                                                         public void run() {
+                if (mReleased || mInfoListener == null) return;
                                                             mInfoListener.onVISID(statisticsInfo.getCuid());
                                                         }
                                                     });
@@ -1323,7 +1376,9 @@ public class MsgProcess {
                             } catch (Exception e) {
                                 e.printStackTrace();
 
-                                resetUsb();
+                                synchronized (MsgProcess.this) {
+                                    if (generation == mUsbGeneration) resetUsb();
+                                }
                                 break;
                             }
 
@@ -1334,14 +1389,17 @@ public class MsgProcess {
             }
         };
 
-        HandlerThread outthread = new HandlerThread("write");
-        outthread.start();
-        mUsbWriteHandler = new Handler(outthread.getLooper()) {
+        mUsbWriteThread = new HandlerThread("write");
+        mUsbWriteThread.start();
+        mUsbWriteHandler = new Handler(mUsbWriteThread.getLooper()) {
             @Override
             public void handleMessage(@NonNull Message msg) {
                 super.handleMessage(msg);
 
+                final int generation = mUsbGeneration;
+                final FileOutputStream output = mOutputStream;
                 try {
+                    if (!usbOk || mReleased || output == null) return;
                     switch (msg.what) {
                         case MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS:
                         case MSG_CMD_MD_INFO:
@@ -1354,9 +1412,9 @@ public class MsgProcess {
                             byte[] headmsg = new byte[8];
                             headmsg[3] = CMD;
                             intToBytes2(carLifeMsg.length, headmsg, 4);//carlifemsg len
-                            mOutputStream.write(headmsg);
+                            output.write(headmsg);
                             log("msg=" + msg.what + "write data =" + Arrays.toString(headmsg));
-                            mOutputStream.write(carLifeMsg);
+                            output.write(carLifeMsg);
                             log("msg=" + msg.what + "write data =" + Arrays.toString(carLifeMsg));
                             log("write data ok");
                         }
@@ -1368,9 +1426,9 @@ public class MsgProcess {
                                 byte[] headmsg = new byte[8];
                                 headmsg[3] = CMD;
                                 intToBytes2(carLifeMsg.length, headmsg, 4);//carlifemsg len
-                                mOutputStream.write(headmsg);
+                                output.write(headmsg);
                                 log("msg=" + msg.what + "write data =" + Arrays.toString(headmsg));
-                                mOutputStream.write(carLifeMsg);
+                                output.write(carLifeMsg);
                                 log("msg=" + msg.what + "write data =" + Arrays.toString(carLifeMsg));
                                 log("write data ok");
                             }
@@ -1380,9 +1438,9 @@ public class MsgProcess {
                                 byte[] headmsg = new byte[8];
                                 headmsg[3] = CMD;
                                 intToBytes2(carLifeMsg.length, headmsg, 4);//carlifemsg len
-                                mOutputStream.write(headmsg);
+                                output.write(headmsg);
                                 log("msg=" + MSG_CMD_FOREGROUND + "write data =" + Arrays.toString(headmsg));
-                                mOutputStream.write(carLifeMsg);
+                                output.write(carLifeMsg);
                                 log("msg=" + MSG_CMD_FOREGROUND + "write data =" + Arrays.toString(carLifeMsg));
                                 log("write data ok");
                             }
@@ -1411,8 +1469,8 @@ public class MsgProcess {
                         case MSG_WRITE_VIDEO: {
                             //log("write audio or video ..................." + msg.what);
                             CarMsg carMsg = (CarMsg) msg.obj;
-                            mOutputStream.write(carMsg.head);
-                            mOutputStream.write(carMsg.msg);
+                            output.write(carMsg.head);
+                            output.write(carMsg.msg);
                             if (carMsg.audioStats != null) {
                                 carMsg.audioStats.bytes.addAndGet(carMsg.msg.length - 12);
                                 carMsg.audioStats.packets.incrementAndGet();
@@ -1422,10 +1480,16 @@ public class MsgProcess {
                     }
                 } catch (Exception e) {
                     e.printStackTrace();
-                    resetUsb();
+                    synchronized (MsgProcess.this) {
+                        if (generation == mUsbGeneration) resetUsb();
+                    }
                 } finally {
                     if (msg.what == MSG_WRITE_AUDIO) {
-                        mPendingAudioPackets.updateAndGet(count -> Math.max(0, count - 1));
+                        synchronized (MsgProcess.this) {
+                            if (generation == mUsbGeneration) {
+                                mPendingAudioPackets.updateAndGet(count -> Math.max(0, count - 1));
+                            }
+                        }
                     }
                 }
             }

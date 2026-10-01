@@ -33,6 +33,11 @@ import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 import static com.projection.car.Utils.REQUEST_CODE;
 import static com.projection.car.Utils.log;
@@ -42,6 +47,8 @@ public class MainActivity extends AppCompatActivity {
     private static final String ACTION_USB_PERMISSION =
             "com.projection.car.action.USB_PERMISSION";
     private static final int REQUEST_AUDIO_PERMISSION = 101;
+    private static final int REQUEST_EXPORT_LOG = 102;
+    private String pendingLogExport;
 
     private ActivityMainBinding binding;
     private UsbManager usbManager;
@@ -65,7 +72,7 @@ public class MainActivity extends AppCompatActivity {
     private final AppLogger.Listener logListener = new AppLogger.Listener() {
         @Override
         public void onLogUpdated() {
-            scheduleLogRender();
+            uiHandler.post(() -> scheduleLogRender());
         }
     };
 
@@ -116,6 +123,7 @@ public class MainActivity extends AppCompatActivity {
                 (buttonView, checked) -> renderLog()
         );
         binding.clearLogButton.setOnClickListener(v -> AppLogger.clear());
+        binding.exportLogButton.setOnClickListener(v -> exportLog());
         binding.toggleLogButton.setOnClickListener(v -> {
             boolean show = binding.logCard.getVisibility() != View.VISIBLE;
             binding.logCard.setVisibility(show ? View.VISIBLE : View.GONE);
@@ -481,6 +489,22 @@ public class MainActivity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
 
+        if (requestCode == REQUEST_EXPORT_LOG) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null
+                    && pendingLogExport != null) {
+                try (OutputStream output = getContentResolver().openOutputStream(data.getData())) {
+                    if (output == null) throw new IOException("cannot open log destination");
+                    output.write(pendingLogExport.getBytes(StandardCharsets.UTF_8));
+                    Toast.makeText(this, R.string.log_export_saved, Toast.LENGTH_SHORT).show();
+                } catch (IOException | RuntimeException e) {
+                    log("[LOG] export failed: " + e);
+                    Toast.makeText(this, R.string.log_export_failed, Toast.LENGTH_LONG).show();
+                }
+            }
+            pendingLogExport = null;
+            return;
+        }
+
         if (requestCode != REQUEST_CODE) {
             return;
         }
@@ -499,7 +523,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         AppLogger.clearListener(logListener);
-        uiHandler.removeCallbacks(logRenderRunnable);
+        uiHandler.removeCallbacksAndMessages(null);
 
         if (receiverRegistered) {
             try {
@@ -508,6 +532,11 @@ public class MainActivity extends AppCompatActivity {
             }
             receiverRegistered = false;
         }
+        if (msgProcess != null) {
+            msgProcess.release();
+            msgProcess = null;
+        }
+        closeAccessory(); // Closing the descriptor also unblocks a pending USB read.
         super.onDestroy();
     }
 
@@ -576,6 +605,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        msgProcess.resetUsb();
         closeAccessory();
 
         fileDescriptor = usbManager.openAccessory(accessory);
@@ -771,6 +801,33 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 
+    private void exportLog() {
+        StringBuilder report = new StringBuilder();
+        report.append("CarProjection ").append(getVersionName()).append(" diagnostics\n")
+                .append("Android ").append(Build.VERSION.RELEASE)
+                .append(" / SDK ").append(Build.VERSION.SDK_INT)
+                .append(" / ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n')
+                .append("TTS compatibility=").append(binding.ttsAudioCompatibilitySwitch.isChecked())
+                .append(" USB media=").append(binding.carLifeMediaAudioSwitch.isChecked()).append('\n')
+                .append("RECORD_AUDIO granted=").append(ContextCompat.checkSelfPermission(this,
+                        Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED).append('\n')
+                .append(binding.audioHuStatusValue.getText()).append('\n')
+                .append("Log includes all categories, regardless of the input-only filter.\n\n");
+        for (String line : AppLogger.exportSnapshot()) report.append(line).append('\n');
+        pendingLogExport = report.toString();
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_TITLE, "CarProjection-" + getVersionName() + "-"
+                + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date()) + ".txt");
+        try {
+            startActivityForResult(intent, REQUEST_EXPORT_LOG);
+        } catch (RuntimeException e) {
+            pendingLogExport = null;
+            Toast.makeText(this, R.string.log_export_failed, Toast.LENGTH_LONG).show();
+        }
+    }
+
     private void updateAudioModeControls() {
         boolean tts = binding.ttsAudioCompatibilitySwitch.isChecked();
         binding.carLifeMediaAudioSwitch.setEnabled(!tts);
@@ -812,7 +869,7 @@ public class MainActivity extends AppCompatActivity {
                     .getPackageInfo(getPackageName(), 0)
                     .versionName;
         } catch (PackageManager.NameNotFoundException e) {
-            return "0.3.2";
+            return "0.3.3";
         }
     }
 

@@ -586,6 +586,13 @@
                             android:text="@string/clear_log" />
                     </LinearLayout>
 
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/exportLogButton"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/export_log" />
+
                     <ScrollView
                         android:id="@+id/logScroll"
                         android:layout_width="match_parent"

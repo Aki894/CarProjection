@@ -181,8 +181,7 @@ public class MediaCodecTool {
                     try {
                         ByteBuffer outputBuffer = codec.getOutputBuffer(index);
                         if (outputBuffer == null || bufferInfo.size <= 0) {
-                            codec.releaseOutputBuffer(index, false);
-                            return;
+                            return; // The finally block releases each buffer exactly once.
                         }
 
                         outputBuffer.position(bufferInfo.offset);

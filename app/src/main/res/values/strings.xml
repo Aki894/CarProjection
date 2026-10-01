@@ -71,4 +71,7 @@
     <string name="write_settings_missing">尚未授权亮度控制</string>
     <string name="enable_accessibility_first">请先开启“CarProjection 车机反控”无障碍服务</string>
     <string name="grant_write_settings_first">请先允许 CarProjection 修改系统设置</string>
+    <string name="export_log">导出诊断日志</string>
+    <string name="log_export_saved">诊断日志已保存</string>
+    <string name="log_export_failed">无法保存诊断日志，请重新选择保存位置</string>
 </resources>
