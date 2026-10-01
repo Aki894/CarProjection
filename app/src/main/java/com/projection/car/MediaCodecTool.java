@@ -5,262 +5,339 @@ import android.content.Context;
 import android.content.Intent;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
-import android.media.AudioFormat;
-import android.media.AudioPlaybackCaptureConfiguration;
-import android.media.AudioRecord;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
-import android.media.MediaRecorder;
 import android.media.projection.MediaProjection;
-import android.media.projection.MediaProjection.Callback;
 import android.media.projection.MediaProjectionManager;
-import android.os.Build;
-import android.support.annotation.NonNull;
-import android.util.Log;
+import android.view.Surface;
 
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
+import androidx.annotation.NonNull;
+
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 import static com.projection.car.Utils.log;
 
-
 public class MediaCodecTool {
 
-    private static final String SCREENCAP_NAME = "screencap";
-    private static final String TAG = MediaCodecTool.class.getName();
+    private static final String SCREENCAP_NAME = "CarProjection";
 
-    private MediaProjection sMediaProjection;
-    private MediaProjectionManager mProjectionManager;
-    private VirtualDisplay mVirtualDisplay;
+    private Context appContext;
+    private MediaProjection mediaProjection;
+    private VirtualDisplay virtualDisplay;
+    private MediaCodec mediaCodec;
+    private Surface inputSurface;
 
-    private MediaCodec mMediaCodec;
-    private boolean mFirstConfigFrame;
-    private byte[] mConfigByte;
-    private VideoDataEncodeListener mEncodeCall;
+    private boolean firstConfigFrame;
+    private byte[] configBytes;
+    private VideoDataEncodeListener encodeListener;
+    private ProjectionReadyListener projectionReadyListener;
 
-    private int mDensity;
-    private int mWidth;
-    private int mHeight;
-    private int mBit, mFrame;
+    private int density;
+    private int width;
+    private int height;
+    private int videoFps;
+    private int videoBitrate;
 
-    private boolean testAudio = false;
-    private FileOutputStream mOutputStream;
-
-    MediaCodecTool() {
-
+    public MediaProjection getMediaProjection() {
+        return mediaProjection;
     }
 
-    private void createVirtualDisplay() {
-        if (testAudio) {
-            try {
-                mOutputStream = new FileOutputStream("/sdcard/test.mp4");
-            } catch (FileNotFoundException e) {
-                e.printStackTrace();
+    public void startProjection(
+            Activity activity,
+            VideoDataEncodeListener encodeListener,
+            int requestCode,
+            float width,
+            float height,
+            int videoFps,
+            int videoBitrate
+    ) {
+        this.appContext = activity.getApplicationContext();
+        this.encodeListener = encodeListener;
+        this.width = (int) width;
+        this.height = (int) height;
+        this.videoFps = videoFps;
+        this.videoBitrate = videoBitrate;
+        this.density = activity.getResources().getDisplayMetrics().densityDpi;
+
+        MediaProjectionManager manager =
+                (MediaProjectionManager) activity.getSystemService(
+                        Context.MEDIA_PROJECTION_SERVICE
+                );
+        activity.startActivityForResult(
+                manager.createScreenCaptureIntent(),
+                requestCode
+        );
+    }
+
+    public void onActivityResult(
+            Activity activity,
+            int resultCode,
+            Intent resultData,
+            ProjectionReadyListener readyListener
+    ) {
+        if (resultData == null) {
+            return;
+        }
+
+        appContext = activity.getApplicationContext();
+        projectionReadyListener = readyListener;
+
+        ProjectionBridge.setListener(projection -> {
+            ProjectionBridge.clearListener();
+            mediaProjection = projection;
+            if (mediaProjection == null) {
+                return;
             }
-        }
 
+            mediaProjection.registerCallback(
+                    new MediaProjectionStopCallback(),
+                    null
+            );
+            createVirtualDisplay();
 
-        log("VIS w = " + mWidth + ", h = " + mHeight);
-        try {
-            mMediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
-            MediaFormat mediaFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, mWidth, mHeight);
-            mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, mFrame);//4000000
-            mediaFormat.setInteger(MediaFormat.KEY_FRAME_RATE, mBit);//10
-            mediaFormat.setInteger(MediaFormat.KEY_CAPTURE_RATE, mBit);//10
-            mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
-            mediaFormat.setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100000L);
-            mediaFormat.setLong(MediaFormat.KEY_DURATION, 100000L);
-            mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);//2130706433
-//          mediaFormat.setInteger("profile", 1);
-//          mediaFormat.setInteger("level", 256);
-            mMediaCodec.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+            if (projectionReadyListener != null) {
+                projectionReadyListener.onProjectionReady();
+            }
+        });
 
-            mVirtualDisplay = sMediaProjection.createVirtualDisplay(SCREENCAP_NAME, mWidth, mHeight, mDensity, DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC, mMediaCodec.createInputSurface(), null, null);
-
-
-            mMediaCodec.setCallback(new MediaCodec.Callback() {
-                @Override
-                public void onInputBufferAvailable(@NonNull MediaCodec codec, int index) {
-
-                }
-
-                @Override
-                public void onOutputBufferAvailable(@NonNull MediaCodec codec, int index, @NonNull MediaCodec.BufferInfo bufferInfo) {
-                    try {
-                        ByteBuffer outputBuffer = mMediaCodec.getOutputBuffer(index);
-                        byte[] outData = new byte[bufferInfo.size];
-                        outputBuffer.get(outData);
-                        // flags 利用位操作，定义的 flag 都是 2 的倍数
-                        if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) { // 配置相关的内容，也就是 SPS，PPS
-                            if (testAudio) {
-                                mOutputStream.write(outData, 0, outData.length);
-                                mOutputStream.flush();
-                            }
-
-
-                            mConfigByte = new byte[outData.length];
-                            mFirstConfigFrame = true;
-                            System.arraycopy(outData, 0, mConfigByte, 0, outData.length);
-                            Log.e(TAG, "now CONFIG is" + Arrays.toString(mConfigByte));
-                        } else if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) { // 关键帧
-                            if (testAudio) {
-                                mOutputStream.write(outData, 0, outData.length);
-                                mOutputStream.flush();
-                            }
-                            if (mEncodeCall != null) {
-                                Log.e(TAG, "now frame is" + outData.length);
-                                if (mFirstConfigFrame) {
-                                    mFirstConfigFrame = false;
-                                    byte[] t = new byte[mConfigByte.length + outData.length];
-                                    System.arraycopy(mConfigByte, 0, t, 0, mConfigByte.length);
-                                    System.arraycopy(outData, 0, t, mConfigByte.length, outData.length);
-                                    outData = t;
-                                }
-
-                                mEncodeCall.onData(outData);
-                            }
-                        } else {
-                            // 非关键帧和SPS、PPS,直接写入文件，可能是B帧或者P帧
-                            if (testAudio) {
-                                mOutputStream.write(outData, 0, outData.length);
-                                mOutputStream.flush();
-                            }
-
-                            if (mEncodeCall != null) {
-                                mEncodeCall.onData(outData);
-                            }
-                        }
-                        mMediaCodec.releaseOutputBuffer(index, false);
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-
-                }
-
-                @Override
-                public void onError(@NonNull MediaCodec codec, @NonNull MediaCodec.CodecException e) {
-
-                }
-
-                @Override
-                public void onOutputFormatChanged(@NonNull MediaCodec codec, @NonNull MediaFormat format) {
-
-                }
-            });
-            mMediaCodec.start();
-
-
-//            MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
-//            while (true) {
-//                int outputBufferIndex = mMediaCodec.dequeueOutputBuffer(bufferInfo, 0);
-//                // 从输出缓冲区队列中拿到编码好的内容，对内容进行相应处理后在释放
-//                while (outputBufferIndex >= 0) {
-//                    Log.e(TAG, "outputBufferIndex " + outputBufferIndex);
-//                    ByteBuffer[] outputBuffers = mMediaCodec.getOutputBuffers();
-//                    ByteBuffer outputBuffer = outputBuffers[outputBufferIndex];
-//                    byte[] outData = new byte[bufferInfo.size];
-//                    outputBuffer.get(outData);
-//                    // flags 利用位操作，定义的 flag 都是 2 的倍数
-//                    if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) { // 配置相关的内容，也就是 SPS，PPS
-////                        mOutputStream.write(outData, 0, outData.length);
-////                        mOutputStream.flush();
-//
-//                        mConfigByte = new byte[outData.length];
-//                        mFirstConfigFrame = true;
-//                        System.arraycopy(outData,0,mConfigByte,0,outData.length);
-//                        Log.e(TAG,"now CONFIG is" + Arrays.toString(mConfigByte));
-//                    } else if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) { // 关键帧
-////                        mOutputStream.write(outData, 0, outData.length);
-////                        mOutputStream.flush();
-//                        if(mEncodeCall != null){
-//                            Log.e(TAG,"now frame is" + outData.length);
-//                            if(mFirstConfigFrame){
-//                                mFirstConfigFrame = false;
-//                                byte[] t = new byte[mConfigByte.length + outData.length];
-//                                System.arraycopy(mConfigByte,0,t,0,mConfigByte.length);
-//                                System.arraycopy(outData,0,t,mConfigByte.length,outData.length);
-//                                outData = t;
-//                            }
-//
-//                            mEncodeCall.onData(outData);
-//                        }
-//                    } else {
-//                        // 非关键帧和SPS、PPS,直接写入文件，可能是B帧或者P帧
-////                        mOutputStream.write(outData, 0, outData.length);
-////                        mOutputStream.flush();
-//                        if(mEncodeCall != null){
-//                            mEncodeCall.onData(outData);
-//                        }
-//                    }
-//                    mMediaCodec.releaseOutputBuffer(outputBufferIndex, false);
-//                    outputBufferIndex = mMediaCodec.dequeueOutputBuffer(bufferInfo, 0);
-//                }
-//            }
-
-
-        } catch (Exception localException) {
-            localException.printStackTrace();
-        }
-    }
-
-    public MediaProjection getMediaProjection(){
-        return sMediaProjection;
-    }
-
-
-    public void startProjection(Activity context, VideoDataEncodeListener encodeCall, int code,float w, float h, int bit, int frame) {
-        mEncodeCall = encodeCall;
-        mBit = bit;
-        mFrame = frame;
-        mWidth = (int) w;
-        mHeight = (int) h;
-        mProjectionManager = ((MediaProjectionManager) context.getSystemService(Context.MEDIA_PROJECTION_SERVICE));
-        context.startActivityForResult(mProjectionManager.createScreenCaptureIntent(), code);
+        ProjectionService.start(activity, resultCode, resultData);
     }
 
     public void stopProjection() {
-        if (sMediaProjection != null) {
+        ProjectionBridge.clearListener();
+
+        if (mediaProjection != null) {
             try {
-                sMediaProjection.stop();
-            } catch (Exception e) {
-                e.printStackTrace();
+                mediaProjection.stop();
+            } catch (RuntimeException ignored) {
             }
+            mediaProjection = null;
+        } else {
+            releaseEncoderResources();
+        }
+
+        if (appContext != null) {
+            ProjectionService.stop(appContext);
         }
     }
 
-    public void onActivityResult(Activity activity, int paramInt2, Intent paramIntent) {
-        sMediaProjection = mProjectionManager.getMediaProjection(paramInt2, paramIntent);
-        if (sMediaProjection != null) {
-            mDensity = activity.getResources().getDisplayMetrics().densityDpi;
-            createVirtualDisplay();
-            sMediaProjection.registerCallback(new MediaProjectionStopCallback(), null);
-        }
+    private void createVirtualDisplay() {
+        log(
+                "start video encoder: "
+                        + width + "x" + height
+                        + " @" + videoFps + "fps "
+                        + videoBitrate + "bps"
+        );
 
+        try {
+            mediaCodec = MediaCodec.createEncoderByType(
+                    MediaFormat.MIMETYPE_VIDEO_AVC
+            );
+
+            MediaFormat format = MediaFormat.createVideoFormat(
+                    MediaFormat.MIMETYPE_VIDEO_AVC,
+                    width,
+                    height
+            );
+            format.setInteger(MediaFormat.KEY_BIT_RATE, videoBitrate);
+            format.setInteger(MediaFormat.KEY_FRAME_RATE, videoFps);
+            format.setInteger(MediaFormat.KEY_CAPTURE_RATE, videoFps);
+            format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
+            format.setLong(
+                    MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER,
+                    100_000L
+            );
+            format.setInteger(
+                    MediaFormat.KEY_COLOR_FORMAT,
+                    MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
+            );
+
+            mediaCodec.configure(
+                    format,
+                    null,
+                    null,
+                    MediaCodec.CONFIGURE_FLAG_ENCODE
+            );
+
+            inputSurface = mediaCodec.createInputSurface();
+
+            mediaCodec.setCallback(new MediaCodec.Callback() {
+                @Override
+                public void onInputBufferAvailable(
+                        @NonNull MediaCodec codec,
+                        int index
+                ) {
+                    // Surface input mode does not use input buffers.
+                }
+
+                @Override
+                public void onOutputBufferAvailable(
+                        @NonNull MediaCodec codec,
+                        int index,
+                        @NonNull MediaCodec.BufferInfo bufferInfo
+                ) {
+                    try {
+                        ByteBuffer outputBuffer = codec.getOutputBuffer(index);
+                        if (outputBuffer == null || bufferInfo.size <= 0) {
+                            codec.releaseOutputBuffer(index, false);
+                            return;
+                        }
+
+                        outputBuffer.position(bufferInfo.offset);
+                        outputBuffer.limit(
+                                bufferInfo.offset + bufferInfo.size
+                        );
+
+                        byte[] outData = new byte[bufferInfo.size];
+                        outputBuffer.get(outData);
+
+                        if ((bufferInfo.flags
+                                & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                            configBytes = Arrays.copyOf(
+                                    outData,
+                                    outData.length
+                            );
+                            firstConfigFrame = true;
+                            log(
+                                    "H264 codec config received: "
+                                            + configBytes.length + " bytes"
+                            );
+                        } else if ((bufferInfo.flags
+                                & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) {
+                            if (firstConfigFrame
+                                    && configBytes != null
+                                    && configBytes.length > 0) {
+                                firstConfigFrame = false;
+                                byte[] combined = new byte[
+                                        configBytes.length + outData.length
+                                ];
+                                System.arraycopy(
+                                        configBytes,
+                                        0,
+                                        combined,
+                                        0,
+                                        configBytes.length
+                                );
+                                System.arraycopy(
+                                        outData,
+                                        0,
+                                        combined,
+                                        configBytes.length,
+                                        outData.length
+                                );
+                                outData = combined;
+                            }
+
+                            if (encodeListener != null) {
+                                encodeListener.onData(outData);
+                            }
+                        } else if (encodeListener != null) {
+                            encodeListener.onData(outData);
+                        }
+                    } catch (RuntimeException e) {
+                        log("encoder output error: " + e);
+                    } finally {
+                        try {
+                            codec.releaseOutputBuffer(index, false);
+                        } catch (RuntimeException ignored) {
+                        }
+                    }
+                }
+
+                @Override
+                public void onError(
+                        @NonNull MediaCodec codec,
+                        @NonNull MediaCodec.CodecException e
+                ) {
+                    log("video encoder error: " + e.getMessage());
+                }
+
+                @Override
+                public void onOutputFormatChanged(
+                        @NonNull MediaCodec codec,
+                        @NonNull MediaFormat format
+                ) {
+                    log("video output format: " + format);
+                }
+            });
+
+            mediaCodec.start();
+
+            virtualDisplay = mediaProjection.createVirtualDisplay(
+                    SCREENCAP_NAME,
+                    width,
+                    height,
+                    density,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
+                    inputSurface,
+                    null,
+                    null
+            );
+        } catch (Exception e) {
+            log("createVirtualDisplay failed: " + e);
+            stopProjection();
+        }
     }
 
-
-    private class MediaProjectionStopCallback extends Callback {
-        private MediaProjectionStopCallback() {
+    private void releaseEncoderResources() {
+        if (virtualDisplay != null) {
+            try {
+                virtualDisplay.release();
+            } catch (RuntimeException ignored) {
+            }
+            virtualDisplay = null;
         }
 
+        if (mediaCodec != null) {
+            try {
+                mediaCodec.stop();
+            } catch (RuntimeException ignored) {
+            }
+            try {
+                mediaCodec.release();
+            } catch (RuntimeException ignored) {
+            }
+            mediaCodec = null;
+        }
+
+        if (inputSurface != null) {
+            try {
+                inputSurface.release();
+            } catch (RuntimeException ignored) {
+            }
+            inputSurface = null;
+        }
+
+        configBytes = null;
+        firstConfigFrame = false;
+    }
+
+    private final class MediaProjectionStopCallback
+            extends MediaProjection.Callback {
+
+        @Override
         public void onStop() {
+            log("MediaProjection stopped");
+            mediaProjection = null;
+            releaseEncoderResources();
 
-            Log.e(TAG, "stopping projection.");
-
-            mMediaCodec.stop();
-
-            if (mVirtualDisplay != null) {
-                mVirtualDisplay.release();
+            if (appContext != null) {
+                BrightnessController.setProjectionActive(
+                        appContext,
+                        false
+                );
+                ProjectionService.stop(appContext);
             }
-            sMediaProjection.unregisterCallback(MediaCodecTool.MediaProjectionStopCallback.this);
         }
     }
-
 
     public interface VideoDataEncodeListener {
         void onData(byte[] data);
+    }
+
+    public interface ProjectionReadyListener {
+        void onProjectionReady();
     }
 }
