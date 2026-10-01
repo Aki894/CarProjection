@@ -23,6 +23,7 @@ final class RemoteCursorController {
     private static final String KEY_ENABLED = "reverse_control_enabled";
     private static final String KEY_SENSITIVITY = "pointer_sensitivity";
     private static final String KEY_ACCELERATION = "pointer_acceleration";
+    private static final String KEY_LOCK_CURSOR_DURING_DRAG = "lock_cursor_during_drag";
 
     private static final float DEFAULT_SENSITIVITY = 1.8f;
     private static final float DEFAULT_ACCELERATION = 0.6f;
@@ -127,30 +128,50 @@ final class RemoteCursorController {
                 refreshBounds();
 
                 float gain = calculateGain(dx, dy);
-                cursorX = clamp(
-                        cursorX + dx * gain,
-                        cursorSize / 2f,
-                        screenWidth - cursorSize / 2f
-                );
-                cursorY = clamp(
-                        cursorY + dy * gain,
-                        cursorSize / 2f,
-                        screenHeight - cursorSize / 2f
-                );
+                boolean lockCursor = dragArmed && isCursorLockedDuringDrag();
+
+                if (lockCursor) {
+                    dragPendingX = clamp(
+                            dragPendingX + dx * gain,
+                            cursorSize / 2f,
+                            screenWidth - cursorSize / 2f
+                    );
+                    dragPendingY = clamp(
+                            dragPendingY + dy * gain,
+                            cursorSize / 2f,
+                            screenHeight - cursorSize / 2f
+                    );
+                } else {
+                    cursorX = clamp(
+                            cursorX + dx * gain,
+                            cursorSize / 2f,
+                            screenWidth - cursorSize / 2f
+                    );
+                    cursorY = clamp(
+                            cursorY + dy * gain,
+                            cursorSize / 2f,
+                            screenHeight - cursorSize / 2f
+                    );
+                    updateCursorPosition();
+
+                    if (dragArmed) {
+                        dragPendingX = cursorX;
+                        dragPendingY = cursorY;
+                    }
+                }
 
                 padMoved = true;
-                updateCursorPosition();
 
                 if (dragArmed) {
-                    dragPendingX = cursorX;
-                    dragPendingY = cursorY;
-
                     if (!liveDragActive) {
                         liveDragActive = true;
                         dragInjectedX = dragOriginX;
                         dragInjectedY = dragOriginY;
                         continuedStroke = null;
-                        Utils.log("[CONTROL] LIVE_DRAG start");
+                        Utils.log(
+                                "[CONTROL] LIVE_DRAG start lockCursor="
+                                        + lockCursor
+                        );
                     }
 
                     dispatchNextDragSegment();
@@ -425,6 +446,13 @@ final class RemoteCursorController {
                 PREFS,
                 Context.MODE_PRIVATE
         ).getBoolean(KEY_ENABLED, true);
+    }
+
+    private boolean isCursorLockedDuringDrag() {
+        return service.getSharedPreferences(
+                PREFS,
+                Context.MODE_PRIVATE
+        ).getBoolean(KEY_LOCK_CURSOR_DURING_DRAG, false);
     }
 
     @SuppressWarnings("deprecation")
