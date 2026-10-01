@@ -34,7 +34,7 @@
     <string name="accessibility_disabled">反向控制服务未开启</string>
     <string name="open_accessibility_settings">打开无障碍设置</string>
     <string name="reverse_control">启用车机触控板反向控制</string>
-    <string name="reverse_control_summary">滑动 Remote Touch 移动虚拟光标，按下触控板执行点击；轻触一次后快速再次触摸并滑动可模拟手指拖拽。需要开启无障碍服务。</string>
+    <string name="reverse_control_summary">滑动 Remote Touch 移动虚拟光标，按下触控板执行点击；轻触一次后快速再次触摸并滑动可实时模拟手指拖拽。需要开启无障碍服务。</string>
     <string name="pointer_sensitivity">指针速度</string>
     <string name="pointer_acceleration">指针加速度</string>
     <string name="pointer_value_format">%1$.1f×</string>
