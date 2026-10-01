@@ -34,7 +34,6 @@ public class Utils {
     public static final int MSG_CMD_HU_INFO = 0x00018003;//98307
     public static final int MSG_CMD_VIDEO_ENCODER_INIT = 0x00018007;//98311
     public static final int MSG_CMD_VIDEO_ENCODER_START = 0x00018009;//98313
-    public static final int MSG_CMD_MODULE_STATUS = 0x00010026;//65574 MD -> HU
     public static final int MSG_CMD_STATISTIC_INFO = 0x00018027;//98343
     public static final int MSG_CMD_MODULE_CONTROL = 0x00018028;//98344 HU -> MD
 
