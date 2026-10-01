@@ -29,6 +29,7 @@ import com.baidu.carlife.protobuf.CarlifeCarHardKeyCodeProto;
 import com.baidu.carlife.protobuf.CarlifeMusicInitProto;
 import com.baidu.carlife.protobuf.CarlifeModuleStatusProto;
 import com.baidu.carlife.protobuf.CarlifeTouchActionProto;
+import com.baidu.carlife.protobuf.CarlifeTTSInitProto;
 import com.example.car.CarlifeAuthenResultProto;
 import com.example.car.CarlifeDeviceInfoProto;
 import com.example.car.CarlifeProtocolVersionMatchStatusProto;
@@ -75,6 +76,9 @@ import static com.projection.car.Utils.MSG_CMD_VIDEO_ENCODER_INIT_DONE;
 import static com.projection.car.Utils.MSG_CMD_VIDEO_ENCODER_START;
 import static com.projection.car.Utils.MSG_MEDIA_DATA;
 import static com.projection.car.Utils.MSG_MEDIA_INIT;
+import static com.projection.car.Utils.MSG_NAVI_TTS_INIT;
+import static com.projection.car.Utils.MSG_NAVI_TTS_DATA;
+import static com.projection.car.Utils.MSG_NAVI_TTS_END;
 import static com.projection.car.Utils.MSG_TOUCH_ACTION;
 import static com.projection.car.Utils.MSG_TOUCH_CAR_HARD_KEY_CODE;
 import static com.projection.car.Utils.MSG_TOUCH_PAD_DOWN;
@@ -86,6 +90,7 @@ import static com.projection.car.Utils.MSG_WRITE_AUDIO;
 import static com.projection.car.Utils.MSG_WRITE_VIDEO;
 import static com.projection.car.Utils.REQUEST_CODE;
 import static com.projection.car.Utils.TOUCH;
+import static com.projection.car.Utils.TTS;
 import static com.projection.car.Utils.VIDEO;
 import static com.projection.car.Utils.bytesToInt2;
 import static com.projection.car.Utils.bytesToShort2;
@@ -284,6 +289,18 @@ public class MsgProcess {
     }
 
     public boolean playAudioTestTone() {
+        return startAudioTest(AudioHandler.AUDIO_TEST_MEDIA_48K);
+    }
+
+    public boolean playAudioTestTone44k() {
+        return startAudioTest(AudioHandler.AUDIO_TEST_MEDIA_44K);
+    }
+
+    public boolean playTtsTestTone() {
+        return startAudioTest(AudioHandler.AUDIO_TEST_TTS_16K);
+    }
+
+    private boolean startAudioTest(int what) {
         if (!usbOk || mOutputStream == null) {
             log("[AUDIO-TEST] rejected: CarLife is not connected");
             return false;
@@ -292,7 +309,7 @@ public class MsgProcess {
             log("[AUDIO-TEST] already running");
             return false;
         }
-        mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_TEST_TONE);
+        mAudioReadHandler.sendEmptyMessage(what);
         return true;
     }
 
@@ -462,7 +479,9 @@ public class MsgProcess {
         public static final int AUDIO_START = 0;
         public static final int AUDIO_READ = 1;
         public static final int AUDIO_STOP = 3;
-        public static final int AUDIO_TEST_TONE = 4;
+        public static final int AUDIO_TEST_MEDIA_48K = 4;
+        public static final int AUDIO_TEST_MEDIA_44K = 5;
+        public static final int AUDIO_TEST_TTS_16K = 6;
 
         private AudioRecord mAudioRecord;
         private boolean mAudioStart;
@@ -610,8 +629,14 @@ public class MsgProcess {
                 case AUDIO_STOP:
                     stopCapture();
                     break;
-                case AUDIO_TEST_TONE:
-                    runCarLifeTestTone();
+                case AUDIO_TEST_MEDIA_48K:
+                    runMediaTestTone(48000);
+                    break;
+                case AUDIO_TEST_MEDIA_44K:
+                    runMediaTestTone(44100);
+                    break;
+                case AUDIO_TEST_TTS_16K:
+                    runTtsTestTone();
                     break;
             }
 
@@ -634,7 +659,7 @@ public class MsgProcess {
             }
         }
 
-        private void runCarLifeTestTone() {
+        private void runMediaTestTone(int sampleRate) {
             if (!usbOk || mOutputStream == null || mAudioTestToneActive) {
                 return;
             }
@@ -644,16 +669,19 @@ public class MsgProcess {
             stopCapture();
 
             try {
-                sendMediaInitPacket();
+                sendMediaInitPacket(sampleRate);
 
-                final int sampleRate = 48000;
                 final int frequency = 1000;
-                final int framesPerPacket = 640; // 2560 bytes per packet, same as normal capture path
-                final int packetCount = 150;     // 2 seconds at 48 kHz
-                final int amplitude = 6500;      // ~20% full scale
+                final int framesPerPacket = sampleRate / 50; // exactly 20 ms
+                final int packetCount = 100;                // exactly 2 seconds
+                final int amplitude = 6500;
 
                 long sampleIndex = 0;
-                log("[AUDIO-TEST] START 1kHz 48kHz stereo PCM16 duration=2s");
+                log(
+                        "[AUDIO-TEST] MEDIA START 1kHz "
+                                + sampleRate
+                                + "Hz stereo PCM16 duration=2s"
+                );
 
                 for (int packet = 0; packet < packetCount && usbOk; packet++) {
                     byte[] pcm = new byte[framesPerPacket * 4];
@@ -677,9 +705,83 @@ public class MsgProcess {
                     SystemClock.sleep(20);
                 }
 
-                log("[AUDIO-TEST] END");
+                log("[AUDIO-TEST] MEDIA END " + sampleRate + "Hz");
             } catch (Exception e) {
-                log("[AUDIO-TEST] failed: " + e);
+                log("[AUDIO-TEST] MEDIA failed: " + e);
+            } finally {
+                mAudioTestToneActive = false;
+                if (restartCapture && mCarLifeMediaAudioEnabled && usbOk) {
+                    sendEmptyMessage(AUDIO_START);
+                }
+            }
+        }
+
+        private void runTtsTestTone() {
+            if (!usbOk || mOutputStream == null || mAudioTestToneActive) {
+                return;
+            }
+
+            boolean restartCapture = mAudioStart;
+            mAudioTestToneActive = true;
+            stopCapture();
+
+            try {
+                final int sampleRate = 16000;
+                final int frequency = 1000;
+                final int framesPerPacket = 320; // 20 ms mono
+                final int packetCount = 100;
+                final int amplitude = 6500;
+
+                CarlifeTTSInitProto.CarlifeTTSInit init =
+                        CarlifeTTSInitProto.CarlifeTTSInit.newBuilder()
+                                .setSampleRate(sampleRate)
+                                .setChannelConfig(1)
+                                .setSampleFormat(16)
+                                .build();
+                enqueueAudioPacket(
+                        TTS,
+                        MSG_NAVI_TTS_INIT,
+                        init.toByteArray(),
+                        init.getSerializedSize()
+                );
+
+                long sampleIndex = 0;
+                log("[AUDIO-TEST] TTS START 1kHz 16kHz mono PCM16 duration=2s");
+
+                for (int packet = 0; packet < packetCount && usbOk; packet++) {
+                    byte[] pcm = new byte[framesPerPacket * 2];
+                    int offset = 0;
+
+                    for (int frame = 0; frame < framesPerPacket; frame++) {
+                        double phase = 2.0 * Math.PI * frequency
+                                * sampleIndex / sampleRate;
+                        short value = (short) Math.round(
+                                Math.sin(phase) * amplitude
+                        );
+                        sampleIndex++;
+
+                        pcm[offset++] = (byte) (value & 0xFF);
+                        pcm[offset++] = (byte) ((value >> 8) & 0xFF);
+                    }
+
+                    enqueueAudioPacket(
+                            TTS,
+                            MSG_NAVI_TTS_DATA,
+                            pcm,
+                            pcm.length
+                    );
+                    SystemClock.sleep(20);
+                }
+
+                enqueueAudioPacket(
+                        TTS,
+                        MSG_NAVI_TTS_END,
+                        new byte[0],
+                        0
+                );
+                log("[AUDIO-TEST] TTS END");
+            } catch (Exception e) {
+                log("[AUDIO-TEST] TTS failed: " + e);
             } finally {
                 mAudioTestToneActive = false;
                 if (restartCapture && mCarLifeMediaAudioEnabled && usbOk) {
@@ -690,20 +792,37 @@ public class MsgProcess {
     }
 
     private void sendMediaInitPacket() {
+        sendMediaInitPacket(48000);
+    }
+
+    private void sendMediaInitPacket(int sampleRate) {
         CarlifeMusicInitProto.CarlifeMusicInit.Builder builder =
                 CarlifeMusicInitProto.CarlifeMusicInit.newBuilder();
-        builder.setSampleRate(48000);
+        builder.setSampleRate(sampleRate);
         builder.setChannelConfig(2);
         builder.setSampleFormat(16);
         byte[] init = builder.build().toByteArray();
         enqueueMediaPacket(MSG_MEDIA_INIT, init, init.length);
-        log("[AUDIO] MEDIA_INIT sent 48000Hz channelConfig=2 sampleFormat=16");
+        log(
+                "[AUDIO] MEDIA_INIT sent "
+                        + sampleRate
+                        + "Hz channelConfig=2 sampleFormat=16"
+        );
     }
 
     private void enqueueMediaPacket(int serviceType, byte[] data, int length) {
+        enqueueAudioPacket(MEDIA, serviceType, data, length);
+    }
+
+    private void enqueueAudioPacket(
+            byte channel,
+            int serviceType,
+            byte[] data,
+            int length
+    ) {
         byte[] carLifeMsg = exportVideoMsg(serviceType, data, length);
         byte[] headmsg = new byte[8];
-        headmsg[3] = MEDIA;
+        headmsg[3] = channel;
         intToBytes2(carLifeMsg.length, headmsg, 4);
         CarMsg carMsg = new CarMsg(headmsg, carLifeMsg);
         mUsbWriteHandler.obtainMessage(MSG_WRITE_AUDIO, carMsg).sendToTarget();
@@ -784,7 +903,7 @@ public class MsgProcess {
                                                 CarlifeFeatureConfigProto.CarlifeFeatureConfig mediaSampleRate =
                                                         CarlifeFeatureConfigProto.CarlifeFeatureConfig.newBuilder()
                                                                 .setKey("MEDIA_SAMPLE_RATE")
-                                                                .setValue(mCarLifeMediaAudioEnabled ? 1 : 0)
+                                                                .setValue(0)
                                                                 .build();
                                                 CarlifeFeatureConfigProto.CarlifeFeatureConfig contentEncryption =
                                                         CarlifeFeatureConfigProto.CarlifeFeatureConfig.newBuilder()
@@ -803,8 +922,7 @@ public class MsgProcess {
                                                         "[FEATURE] request FOCUS_UI=1"
                                                                 + " AUDIO_TRANSMISSION_MODE="
                                                                 + (mCarLifeMediaAudioEnabled ? 0 : 1)
-                                                                + " MEDIA_SAMPLE_RATE="
-                                                                + (mCarLifeMediaAudioEnabled ? 1 : 0)
+                                                                + " MEDIA_SAMPLE_RATE=0"
                                                                 + " CONTENT_ENCRYPTION=0"
                                                 );
                                                 mUsbWriteHandler.obtainMessage(
