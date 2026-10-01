@@ -46,7 +46,9 @@ public class Utils {
     public static final int MSG_CMD_FOREGROUND = 0x0001001B;//65563
 
 
-    public static final int MSG_CMD_MD_FEATURE_CONFIG_REQUEST = 0x00010051;//65617
+    public static final int MSG_CMD_MD_FEATURE_CONFIG_REQUEST = 0x00010051;
+    public static final int MSG_CMD_MD_RSA_PUBLIC_KEY_REQUEST = 0x0001006A;
+    public static final int MSG_CMD_HU_RSA_PUBLIC_KEY_RESPONSE = 0x0001806B;//65617
     public static final int MSG_CMD_HU_FEATURE_CONFIG_RESPONSE = 0x00018052;//98386
 
 
