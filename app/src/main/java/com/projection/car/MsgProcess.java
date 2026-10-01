@@ -142,6 +142,7 @@ public class MsgProcess {
     private volatile boolean mAudioTestToneActive;
     private Integer mHuAudioTransmissionMode;
     private Integer mHuMediaSampleRate;
+    private Integer mHuContentEncryption;
     private InfoListener mInfoListener;
 
     MsgProcess(Activity context, int bit, int frame, InfoListener infoListener) {
@@ -191,6 +192,7 @@ public class MsgProcess {
         log("startProjection");
         mHuAudioTransmissionMode = null;
         mHuMediaSampleRate = null;
+        mHuContentEncryption = null;
         notifyAudioFeatureStatus();
         usbOk = true;
         mInputStream = in;
@@ -269,10 +271,11 @@ public class MsgProcess {
 
         final Integer mode = mHuAudioTransmissionMode;
         final Integer sampleRate = mHuMediaSampleRate;
+        final Integer contentEncryption = mHuContentEncryption;
         mMainHandler.post(new Runnable() {
             @Override
             public void run() {
-                mInfoListener.onAudioFeatures(mode, sampleRate);
+                mInfoListener.onAudioFeatures(mode, sampleRate, contentEncryption);
             }
         });
     }
@@ -739,12 +742,18 @@ public class MsgProcess {
                                                                 .setKey("MEDIA_SAMPLE_RATE")
                                                                 .setValue(mCarLifeMediaAudioEnabled ? 1 : 0)
                                                                 .build();
+                                                CarlifeFeatureConfigProto.CarlifeFeatureConfig contentEncryption =
+                                                        CarlifeFeatureConfigProto.CarlifeFeatureConfig.newBuilder()
+                                                                .setKey("CONTENT_ENCRYPTION")
+                                                                .setValue(0)
+                                                                .build();
                                                 CarlifeFeatureConfigListProto.CarlifeFeatureConfigList featureRequest =
                                                         CarlifeFeatureConfigListProto.CarlifeFeatureConfigList.newBuilder()
-                                                                .setCnt(3)
+                                                                .setCnt(4)
                                                                 .addFeatureConfig(focusUi)
                                                                 .addFeatureConfig(audioMode)
                                                                 .addFeatureConfig(mediaSampleRate)
+                                                                .addFeatureConfig(contentEncryption)
                                                                 .build();
                                                 log(
                                                         "[FEATURE] request FOCUS_UI=1"
@@ -752,6 +761,7 @@ public class MsgProcess {
                                                                 + (mCarLifeMediaAudioEnabled ? 0 : 1)
                                                                 + " MEDIA_SAMPLE_RATE="
                                                                 + (mCarLifeMediaAudioEnabled ? 1 : 0)
+                                                                + " CONTENT_ENCRYPTION=0"
                                                 );
                                                 mUsbWriteHandler.obtainMessage(
                                                         MSG_CMD_MD_FEATURE_CONFIG_REQUEST,
@@ -816,6 +826,7 @@ public class MsgProcess {
                                                     log("[FEATURE] HU response cnt=" + response.getCnt());
                                                     mHuAudioTransmissionMode = null;
                                                     mHuMediaSampleRate = null;
+                                                    mHuContentEncryption = null;
                                                     for (CarlifeFeatureConfigProto.CarlifeFeatureConfig feature
                                                             : response.getFeatureConfigList()) {
                                                         log(
@@ -828,6 +839,8 @@ public class MsgProcess {
                                                             mHuAudioTransmissionMode = feature.getValue();
                                                         } else if ("MEDIA_SAMPLE_RATE".equals(feature.getKey())) {
                                                             mHuMediaSampleRate = feature.getValue();
+                                                        } else if ("CONTENT_ENCRYPTION".equals(feature.getKey())) {
+                                                            mHuContentEncryption = feature.getValue();
                                                         }
                                                     }
                                                     notifyAudioFeatureStatus();
@@ -1133,7 +1146,11 @@ public class MsgProcess {
 
         void onVISID(String id);
 
-        void onAudioFeatures(Integer audioTransmissionMode, Integer mediaSampleRate);
+        void onAudioFeatures(
+                Integer audioTransmissionMode,
+                Integer mediaSampleRate,
+                Integer contentEncryption
+        );
 
         void onModuleControl(int moduleId, int statusId);
     }
