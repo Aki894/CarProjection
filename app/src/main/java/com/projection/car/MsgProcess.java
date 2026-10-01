@@ -34,6 +34,7 @@ import com.example.car.CarlifeProtocolVersionMatchStatusProto;
 import com.example.car.CarlifeStatisticsInfoProto;
 import com.example.car.CarlifeVideoEncoderInfoProto;
 import com.google.protobuf.InvalidProtocolBufferException;
+import com.yftech.CarLifeTouchPadActionProto;
 
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -64,6 +65,10 @@ import static com.projection.car.Utils.MSG_MEDIA_DATA;
 import static com.projection.car.Utils.MSG_MEDIA_INIT;
 import static com.projection.car.Utils.MSG_TOUCH_ACTION;
 import static com.projection.car.Utils.MSG_TOUCH_CAR_HARD_KEY_CODE;
+import static com.projection.car.Utils.MSG_TOUCH_PAD_DOWN;
+import static com.projection.car.Utils.MSG_TOUCH_PAD_MOVE;
+import static com.projection.car.Utils.MSG_TOUCH_PAD_UP;
+import static com.projection.car.Utils.MSG_TOUCH_PAD_PINCH;
 import static com.projection.car.Utils.MSG_VIDEO_DATA;
 import static com.projection.car.Utils.MSG_WRITE_AUDIO;
 import static com.projection.car.Utils.MSG_WRITE_VIDEO;
@@ -588,6 +593,50 @@ public class MsgProcess {
                                                     genarateGesture(action.getAction(), action.getX(), action.getY());
                                                 } catch (Exception e) {
                                                     e.printStackTrace();
+                                                }
+                                            }
+                                            break;
+                                            case MSG_TOUCH_PAD_DOWN: {
+                                                try {
+                                                    CarLifeTouchPadActionProto.CarlifeTouchPadDown down =
+                                                            CarLifeTouchPadActionProto.CarlifeTouchPadDown.parseFrom(msgdata);
+                                                    log("[PAD] DOWN ts=" + down.getTimestamp());
+                                                } catch (Exception e) {
+                                                    log("[PAD] DOWN parse error: " + e);
+                                                }
+                                            }
+                                            break;
+                                            case MSG_TOUCH_PAD_MOVE: {
+                                                try {
+                                                    CarLifeTouchPadActionProto.CarlifeTouchPadMove move =
+                                                            CarLifeTouchPadActionProto.CarlifeTouchPadMove.parseFrom(msgdata);
+                                                    log(
+                                                            "[PAD] MOVE dx=" + move.getDeltaX()
+                                                                    + " dy=" + move.getDeltaY()
+                                                                    + " ts=" + move.getTimestamp()
+                                                    );
+                                                } catch (Exception e) {
+                                                    log("[PAD] MOVE parse error: " + e);
+                                                }
+                                            }
+                                            break;
+                                            case MSG_TOUCH_PAD_UP: {
+                                                try {
+                                                    CarLifeTouchPadActionProto.CarlifeTouchPadUp up =
+                                                            CarLifeTouchPadActionProto.CarlifeTouchPadUp.parseFrom(msgdata);
+                                                    log("[PAD] UP ts=" + up.getTimestamp());
+                                                } catch (Exception e) {
+                                                    log("[PAD] UP parse error: " + e);
+                                                }
+                                            }
+                                            break;
+                                            case MSG_TOUCH_PAD_PINCH: {
+                                                try {
+                                                    CarLifeTouchPadActionProto.CarlifeTouchPadPinch pinch =
+                                                            CarLifeTouchPadActionProto.CarlifeTouchPadPinch.parseFrom(msgdata);
+                                                    log("[PAD] PINCH scale=" + pinch.getScale());
+                                                } catch (Exception e) {
+                                                    log("[PAD] PINCH parse error: " + e);
                                                 }
                                             }
                                             break;
