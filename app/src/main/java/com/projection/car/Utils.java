@@ -413,6 +413,91 @@ public class Utils {
 
     public static void log(String str) {
         Log.e(TAG, str);
+        AppLogger.append(str);
+    }
+
+    public static String touchActionName(int action) {
+        switch (action) {
+            case ACTION_DOWN:
+                return "DOWN";
+            case ACTION_UP:
+                return "UP";
+            case ACTION_MOVE:
+                return "MOVE";
+            default:
+                return "ACTION_" + action;
+        }
+    }
+
+    public static String carKeyName(int keyCode) {
+        switch (keyCode) {
+            case KEYCODE_HOME:
+                return "HOME";
+            case KEYCODE_PHONE_CALL:
+                return "PHONE_CALL";
+            case KEYCODE_PHONE_END:
+                return "PHONE_END";
+            case KEYCODE_SELECTOR_NEXT:
+                return "SELECTOR_NEXT";
+            case KEYCODE_SELECTOR_PREVIOUS:
+                return "SELECTOR_PREVIOUS";
+            case KEYCODE_SETTING:
+                return "SETTING";
+            case KEYCODE_MEDIA:
+                return "MEDIA";
+            case KEYCODE_RADIO:
+                return "RADIO";
+            case KEYCODE_NAVI:
+                return "NAVI";
+            case KEYCODE_SRC:
+                return "SRC";
+            case KEYCODE_MODE:
+                return "MODE";
+            case KEYCODE_BACK:
+                return "BACK";
+            case KEYCODE_SEEK_SUB:
+                return "SEEK_SUB";
+            case KEYCODE_SEEK_ADD:
+                return "SEEK_ADD";
+            case KEYCODE_VOLUME_SUB:
+                return "VOLUME_SUB";
+            case KEYCODE_VOLUME_ADD:
+                return "VOLUME_ADD";
+            case KEYCODE_MUTE:
+                return "MUTE";
+            case KEYCODE_OK:
+                return "OK";
+            case KEYCODE_MOVE_LEFT:
+                return "MOVE_LEFT";
+            case KEYCODE_MOVE_RIGHT:
+                return "MOVE_RIGHT";
+            case KEYCODE_MOVE_UP:
+                return "MOVE_UP";
+            case KEYCODE_MOVE_DOWN:
+                return "MOVE_DOWN";
+            case KEYCODE_MOVE_UP_LEFT:
+                return "MOVE_UP_LEFT";
+            case KEYCODE_MOVE_UP_RIGHT:
+                return "MOVE_UP_RIGHT";
+            case KEYCODE_MOVE_DOWN_LEFT:
+                return "MOVE_DOWN_LEFT";
+            case KEYCODE_MOVE_DOWN_RIGHT:
+                return "MOVE_DOWN_RIGHT";
+            case KEYCODE_TEL:
+                return "TEL";
+            case KEYCODE_MAIN:
+                return "MAIN";
+            case KEYCODE_MEDIA_START:
+                return "MEDIA_START";
+            case KEYCODE_MEDIA_STOP:
+                return "MEDIA_STOP";
+            case KEYCODE_VR_START:
+                return "VR_START";
+            case KEYCODE_VR_STOP:
+                return "VR_STOP";
+            default:
+                return "KEY_" + keyCode;
+        }
     }
 
 }
