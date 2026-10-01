@@ -320,6 +320,29 @@ public class MainActivity extends AppCompatActivity {
                     }
 
                     @Override
+                    public void onEncryptionProbe(int state, int keyLength) {
+                        if (state == 0) {
+                            binding.audioEncryptionProbeStatus.setText(
+                                    R.string.audio_encryption_probe_running
+                            );
+                        } else if (state == 1) {
+                            binding.audioEncryptionProbeStatus.setText(
+                                    getString(R.string.audio_encryption_probe_supported)
+                                            + " · keyLen="
+                                            + keyLength
+                            );
+                        } else if (state == -1) {
+                            binding.audioEncryptionProbeStatus.setText(
+                                    R.string.audio_encryption_probe_no_response
+                            );
+                        } else {
+                            binding.audioEncryptionProbeStatus.setText(
+                                    "RSA：HU 响应解析失败"
+                            );
+                        }
+                    }
+
+                    @Override
                     public void onModuleControl(int moduleId, int statusId) {
                         String moduleName;
                         String statusName;
@@ -363,6 +386,19 @@ public class MainActivity extends AppCompatActivity {
         );
 
         binding.saveButton.setOnClickListener(v -> saveVideoSettings());
+        binding.audioEncryptionProbeButton.setOnClickListener(v -> {
+            if (msgProcess != null && msgProcess.requestEncryptionProbe()) {
+                binding.audioEncryptionProbeStatus.setText(
+                        R.string.audio_encryption_probe_running
+                );
+            } else {
+                Snackbar.make(
+                        binding.getRoot(),
+                        R.string.audio_test_not_connected,
+                        Snackbar.LENGTH_LONG
+                ).show();
+            }
+        });
         binding.audioTestToneButton.setOnClickListener(v -> {
             if (msgProcess != null && msgProcess.playAudioTestTone()) {
                 Toast.makeText(
@@ -564,6 +600,9 @@ public class MainActivity extends AppCompatActivity {
         binding.headUnitIdValue.setText(R.string.head_unit_unknown);
         binding.audioHuStatusValue.setText(R.string.audio_hu_waiting);
         binding.audioModuleStatusValue.setText(R.string.audio_module_waiting);
+        binding.audioEncryptionProbeStatus.setText(
+                R.string.audio_encryption_probe_idle
+        );
     }
 
     private void closeAccessory() {
@@ -737,7 +776,7 @@ public class MainActivity extends AppCompatActivity {
                     .getPackageInfo(getPackageName(), 0)
                     .versionName;
         } catch (PackageManager.NameNotFoundException e) {
-            return "0.2.8";
+            return "0.2.9";
         }
     }
 
