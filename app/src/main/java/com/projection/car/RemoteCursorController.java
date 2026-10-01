@@ -180,7 +180,9 @@ final class RemoteCursorController {
                                 60
                         );
 
-                boolean accepted = service.dispatchGesture(
+                BrightnessController.suppressAccessibilityActivityFor(500);
+                BrightnessController.suppressAccessibilityActivityFor(800);
+        boolean accepted = service.dispatchGesture(
                         new GestureDescription.Builder()
                                 .addStroke(stroke)
                                 .build(),
