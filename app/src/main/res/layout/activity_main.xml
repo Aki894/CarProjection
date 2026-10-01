@@ -287,13 +287,29 @@
                         android:layout_marginTop="16dp"
                         android:text="@string/audio_test_tone" />
 
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/audioTest44kButton"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/audio_test_media_44k" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/audioTestTtsButton"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/audio_test_tts" />
+
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="4dp"
                         android:layout_marginTop="2dp"
                         android:layout_marginEnd="4dp"
-                        android:text="@string/audio_test_tone_summary"
+                        android:text="@string/audio_test_tts_summary"
                         android:textAppearance="?attr/textAppearanceBodySmall" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
