@@ -604,8 +604,8 @@ public class MsgProcess {
 
                 final int sampleRate = 48000;
                 final int frequency = 1000;
-                final int framesPerPacket = 960; // 20 ms
-                final int packetCount = 100;     // 2 seconds
+                final int framesPerPacket = 640; // 2560 bytes per packet, same as normal capture path
+                final int packetCount = 150;     // 2 seconds at 48 kHz
                 final int amplitude = 6500;      // ~20% full scale
 
                 long sampleIndex = 0;
