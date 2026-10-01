@@ -1,5 +1,6 @@
 package com.projection.car;
 
+import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -29,6 +30,11 @@ final class RemoteCursorController {
     private static final long DOUBLE_TAP_WINDOW_MS = 450L;
     private static final long TAP_MAX_DURATION_MS = 500L;
 
+    // Short gesture segments keep the drag responsive while avoiding
+    // dispatching a new gesture before Android finishes the previous one.
+    private static final long DRAG_SEGMENT_MIN_MS = 16L;
+    private static final long DRAG_SEGMENT_MAX_MS = 42L;
+
     private final ForgroundService service;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final WindowManager windowManager;
@@ -47,8 +53,18 @@ final class RemoteCursorController {
     private boolean padMoved;
     private boolean sawOkDuringContact;
     private boolean dragArmed;
-    private Path dragPath;
-    private long dragStartTime;
+
+    private boolean liveDragActive;
+    private boolean dragFingerDown;
+    private boolean dragDispatchInFlight;
+    private float dragOriginX;
+    private float dragOriginY;
+    private float dragInjectedX;
+    private float dragInjectedY;
+    private float dragPendingX;
+    private float dragPendingY;
+    private GestureDescription.StrokeDescription continuedStroke;
+    private int dragGeneration;
 
     RemoteCursorController(ForgroundService service) {
         this.service = service;
@@ -76,17 +92,24 @@ final class RemoteCursorController {
                         && now - lastTapUpTime <= DOUBLE_TAP_WINDOW_MS;
 
                 if (dragArmed) {
-                    dragStartTime = now;
-                    dragPath = new Path();
-                    dragPath.moveTo(cursorX, cursorY);
+                    dragOriginX = cursorX;
+                    dragOriginY = cursorY;
+                    dragInjectedX = cursorX;
+                    dragInjectedY = cursorY;
+                    dragPendingX = cursorX;
+                    dragPendingY = cursorY;
+                    dragFingerDown = true;
+                    dragDispatchInFlight = false;
+                    liveDragActive = false;
+                    continuedStroke = null;
+                    dragGeneration++;
+
                     Utils.log(
-                            "[CONTROL] DRAG armed x="
+                            "[CONTROL] LIVE_DRAG armed x="
                                     + Math.round(cursorX)
                                     + " y="
                                     + Math.round(cursorY)
                     );
-                } else {
-                    dragPath = null;
                 }
             }
         });
@@ -116,12 +139,22 @@ final class RemoteCursorController {
                 );
 
                 padMoved = true;
-
-                if (dragArmed && dragPath != null) {
-                    dragPath.lineTo(cursorX, cursorY);
-                }
-
                 updateCursorPosition();
+
+                if (dragArmed) {
+                    dragPendingX = cursorX;
+                    dragPendingY = cursorY;
+
+                    if (!liveDragActive) {
+                        liveDragActive = true;
+                        dragInjectedX = dragOriginX;
+                        dragInjectedY = dragOriginY;
+                        continuedStroke = null;
+                        Utils.log("[CONTROL] LIVE_DRAG start");
+                    }
+
+                    dispatchNextDragSegment();
+                }
             }
         });
     }
@@ -137,20 +170,28 @@ final class RemoteCursorController {
                 long now = SystemClock.uptimeMillis();
                 long duration = padDownTime > 0 ? now - padDownTime : 0;
 
-                if (dragArmed && padMoved && dragPath != null) {
-                    dispatchDrag(now);
+                if (dragArmed && liveDragActive && padMoved) {
+                    dragFingerDown = false;
+                    dragPendingX = cursorX;
+                    dragPendingY = cursorY;
                     lastTapUpTime = 0;
+
+                    // If a segment is still running, its callback will send
+                    // the final continuation and release the synthetic finger.
+                    if (!dragDispatchInFlight) {
+                        dispatchNextDragSegment();
+                    }
                 } else if (!padMoved
                         && !sawOkDuringContact
                         && duration <= TAP_MAX_DURATION_MS) {
                     lastTapUpTime = now;
-                    Utils.log("[CONTROL] TAP registered for drag");
+                    Utils.log("[CONTROL] TAP registered for live drag");
                 } else {
                     lastTapUpTime = 0;
+                    cancelLiveDragState(false);
                 }
 
                 dragArmed = false;
-                dragPath = null;
                 padDownTime = 0;
                 padMoved = false;
                 sawOkDuringContact = false;
@@ -167,6 +208,12 @@ final class RemoteCursorController {
             @Override
             public void run() {
                 ensureCursor();
+
+                if (liveDragActive) {
+                    Utils.log("[CONTROL] CLICK ignored while live drag is active");
+                    return;
+                }
+
                 sawOkDuringContact = true;
                 lastTapUpTime = 0;
 
@@ -219,38 +266,138 @@ final class RemoteCursorController {
         removeCursor();
     }
 
-    private void dispatchDrag(long now) {
-        if (dragPath == null) {
+    private void dispatchNextDragSegment() {
+        if (!liveDragActive || dragDispatchInFlight) {
             return;
         }
 
-        long duration = Math.max(
-                120L,
-                Math.min(1200L, now - dragStartTime)
+        final boolean finalSegment = !dragFingerDown;
+        final float startX = dragInjectedX;
+        final float startY = dragInjectedY;
+        final float targetX = dragPendingX;
+        final float targetY = dragPendingY;
+
+        float distance = (float) Math.hypot(
+                targetX - startX,
+                targetY - startY
         );
 
-        GestureDescription.StrokeDescription stroke =
-                new GestureDescription.StrokeDescription(
-                        dragPath,
-                        0,
-                        duration
-                );
+        if (!finalSegment && distance < 0.5f) {
+            return;
+        }
 
-        BrightnessController.suppressAccessibilityActivityFor(800);
+        Path segmentPath = new Path();
+        segmentPath.moveTo(startX, startY);
+        if (distance >= 0.5f) {
+            segmentPath.lineTo(targetX, targetY);
+        }
+
+        long duration;
+        if (finalSegment && distance < 0.5f) {
+            duration = 1L;
+        } else {
+            duration = Math.max(
+                    DRAG_SEGMENT_MIN_MS,
+                    Math.min(
+                            DRAG_SEGMENT_MAX_MS,
+                            Math.round(14f + distance / 10f)
+                    )
+            );
+        }
+
+        final GestureDescription.StrokeDescription stroke;
+        try {
+            if (continuedStroke == null) {
+                stroke = new GestureDescription.StrokeDescription(
+                        segmentPath,
+                        0,
+                        duration,
+                        !finalSegment
+                );
+            } else {
+                stroke = continuedStroke.continueStroke(
+                        segmentPath,
+                        0,
+                        duration,
+                        !finalSegment
+                );
+            }
+        } catch (RuntimeException e) {
+            Utils.log("[CONTROL] LIVE_DRAG stroke error: " + e);
+            cancelLiveDragState(false);
+            return;
+        }
+
+        final int generation = dragGeneration;
+        dragDispatchInFlight = true;
+
+        BrightnessController.suppressAccessibilityActivityFor(300);
         boolean accepted = service.dispatchGesture(
                 new GestureDescription.Builder()
                         .addStroke(stroke)
                         .build(),
-                null,
-                null
+                new AccessibilityService.GestureResultCallback() {
+                    @Override
+                    public void onCompleted(GestureDescription gestureDescription) {
+                        if (generation != dragGeneration) {
+                            return;
+                        }
+
+                        dragInjectedX = targetX;
+                        dragInjectedY = targetY;
+                        continuedStroke = stroke;
+                        dragDispatchInFlight = false;
+
+                        if (!stroke.willContinue()) {
+                            Utils.log("[CONTROL] LIVE_DRAG end");
+                            cancelLiveDragState(true);
+                            return;
+                        }
+
+                        // Coalesce every Lexus MOVE received while this segment
+                        // was being dispatched, then immediately chase the
+                        // newest target. If the finger has been lifted, this
+                        // call emits the final continuation with willContinue=false.
+                        dispatchNextDragSegment();
+                    }
+
+                    @Override
+                    public void onCancelled(GestureDescription gestureDescription) {
+                        if (generation != dragGeneration) {
+                            return;
+                        }
+
+                        Utils.log("[CONTROL] LIVE_DRAG cancelled");
+                        dragDispatchInFlight = false;
+                        cancelLiveDragState(false);
+                    }
+                },
+                mainHandler
         );
 
-        Utils.log(
-                "[CONTROL] DRAG duration="
-                        + duration
-                        + "ms accepted="
-                        + accepted
-        );
+        if (!accepted) {
+            dragDispatchInFlight = false;
+            Utils.log("[CONTROL] LIVE_DRAG dispatch rejected");
+            cancelLiveDragState(false);
+        }
+    }
+
+    private void cancelLiveDragState(boolean completed) {
+        liveDragActive = false;
+        dragFingerDown = false;
+        dragDispatchInFlight = false;
+        continuedStroke = null;
+        dragOriginX = 0;
+        dragOriginY = 0;
+        dragInjectedX = 0;
+        dragInjectedY = 0;
+        dragPendingX = 0;
+        dragPendingY = 0;
+
+        if (!completed) {
+            // Invalidate callbacks from any older gesture chain.
+            dragGeneration++;
+        }
     }
 
     private float calculateGain(int dx, int dy) {
@@ -376,7 +523,7 @@ final class RemoteCursorController {
         padMoved = false;
         sawOkDuringContact = false;
         dragArmed = false;
-        dragPath = null;
+        cancelLiveDragState(false);
     }
 
     private int dp(int value) {
