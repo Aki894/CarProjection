@@ -27,6 +27,7 @@ import android.widget.Toast;
 
 import com.baidu.carlife.protobuf.CarlifeCarHardKeyCodeProto;
 import com.baidu.carlife.protobuf.CarlifeMusicInitProto;
+import com.baidu.carlife.protobuf.CarlifeModuleStatusProto;
 import com.baidu.carlife.protobuf.CarlifeTouchActionProto;
 import com.example.car.CarlifeAuthenResultProto;
 import com.example.car.CarlifeDeviceInfoProto;
@@ -63,6 +64,8 @@ import static com.projection.car.Utils.MSG_CMD_HU_INFO;
 import static com.projection.car.Utils.MSG_CMD_HU_PROTOCOL_VERSION;
 import static com.projection.car.Utils.MSG_CMD_MD_AUTHEN_RESULT;
 import static com.projection.car.Utils.MSG_CMD_MD_INFO;
+import static com.projection.car.Utils.MSG_CMD_MODULE_STATUS;
+import static com.projection.car.Utils.MSG_CMD_MODULE_CONTROL;
 import static com.projection.car.Utils.MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS;
 import static com.projection.car.Utils.MSG_CMD_STATISTIC_INFO;
 import static com.projection.car.Utils.MSG_CMD_VIDEO_ENCODER_INIT;
@@ -138,6 +141,7 @@ public class MsgProcess {
     private int mVideoFrame = 0;
     private boolean mCarLifeMediaAudioEnabled = true;
     private volatile boolean mAudioTestToneActive;
+    private volatile boolean mMusicModuleRunning;
     private Integer mHuAudioTransmissionMode;
     private Integer mHuMediaSampleRate;
     private InfoListener mInfoListener;
@@ -189,6 +193,7 @@ public class MsgProcess {
         log("startProjection");
         mHuAudioTransmissionMode = null;
         mHuMediaSampleRate = null;
+        mMusicModuleRunning = false;
         notifyAudioFeatureStatus();
         usbOk = true;
         mInputStream = in;
@@ -220,6 +225,7 @@ public class MsgProcess {
             log("resetUsb");
             usbOk = false;
             mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_STOP);
+            mMusicModuleRunning = false;
             mMediaCodecTool.stopProjection();
             mUsbWriteHandler.removeCallbacksAndMessages(null);
             if (ForgroundService.mService != null) {
@@ -244,6 +250,10 @@ public class MsgProcess {
         log("[AUDIO] CarLife media audio setting=" + enabled + " (reconnect to renegotiate)");
         if (!enabled) {
             mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_STOP);
+            if (usbOk && mMusicModuleRunning) {
+                sendMediaControlPacket(MSG_MEDIA_STOP);
+                sendMusicModuleStatus(false);
+            }
         }
     }
 
@@ -273,6 +283,49 @@ public class MsgProcess {
                 mInfoListener.onAudioFeatures(mode, sampleRate);
             }
         });
+    }
+
+    private void notifyModuleControl(final int moduleId, final int statusId) {
+        if (mInfoListener == null) {
+            return;
+        }
+        mMainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                mInfoListener.onModuleControl(moduleId, statusId);
+            }
+        });
+    }
+
+    private void sendMusicModuleStatus(boolean running) {
+        mMusicModuleRunning = running;
+
+        CarlifeModuleStatusProto.CarlifeModuleStatus status =
+                CarlifeModuleStatusProto.CarlifeModuleStatus.newBuilder()
+                        .setModuleID(3)
+                        .setStatusID(running ? 1 : 0)
+                        .build();
+
+        log(
+                "[MODULE] MD music="
+                        + (running ? "RUNNING" : "IDLE")
+                        + " (id=3 status="
+                        + (running ? 1 : 0)
+                        + ")"
+        );
+
+        mUsbWriteHandler.obtainMessage(
+                MSG_CMD_MODULE_STATUS,
+                exportCMDMsg(
+                        MSG_CMD_MODULE_STATUS,
+                        status.toByteArray()
+                )
+        ).sendToTarget();
+    }
+
+    private void sendMediaControlPacket(int serviceType) {
+        byte[] empty = new byte[0];
+        enqueueMediaPacket(serviceType, empty, 0);
     }
 
 
@@ -622,13 +675,20 @@ public class MsgProcess {
             } finally {
                 mAudioTestToneActive = false;
                 if (restartCapture && mCarLifeMediaAudioEnabled && usbOk) {
+                    // Same MEDIA session stays active. Resume captured PCM.
                     sendEmptyMessage(AUDIO_START);
+                } else if (usbOk) {
+                    sendMediaControlPacket(MSG_MEDIA_STOP);
+                    sendMusicModuleStatus(false);
                 }
             }
         }
     }
 
     private void sendMediaInitPacket() {
+        if (!mMusicModuleRunning) {
+            sendMusicModuleStatus(true);
+        }
         CarlifeMusicInitProto.CarlifeMusicInit.Builder builder =
                 CarlifeMusicInitProto.CarlifeMusicInit.newBuilder();
         builder.setSampleRate(48000);
@@ -774,6 +834,28 @@ public class MsgProcess {
                                             break;
                                             case MSG_CMD_VIDEO_ENCODER_START: {
                                                 mUsbWriteHandler.obtainMessage(MSG_CMD_VIDEO_ENCODER_START).sendToTarget();
+                                            }
+                                            break;
+                                            case MSG_CMD_MODULE_CONTROL: {
+                                                try {
+                                                    CarlifeModuleStatusProto.CarlifeModuleStatus control =
+                                                            CarlifeModuleStatusProto.CarlifeModuleStatus.parseFrom(msgdata);
+                                                    int moduleId = control.getModuleID();
+                                                    int statusId = control.getStatusID();
+                                                    log(
+                                                            "[MODULE] HU control module="
+                                                                    + moduleId
+                                                                    + " status="
+                                                                    + statusId
+                                                    );
+                                                    notifyModuleControl(moduleId, statusId);
+
+                                                    if (moduleId == 3) {
+                                                        sendMusicModuleStatus(mMusicModuleRunning);
+                                                    }
+                                                } catch (Exception e) {
+                                                    log("[MODULE] HU control parse error: " + e);
+                                                }
                                             }
                                             break;
                                             case MSG_CMD_HU_FEATURE_CONFIG_RESPONSE: {
@@ -1009,7 +1091,8 @@ public class MsgProcess {
                         case MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS:
                         case MSG_CMD_MD_INFO:
                         case MSG_CMD_MD_AUTHEN_RESULT:
-                        case MSG_CMD_MD_FEATURE_CONFIG_REQUEST: {
+                        case MSG_CMD_MD_FEATURE_CONFIG_REQUEST:
+                        case MSG_CMD_MODULE_STATUS: {
                             byte[] carLifeMsg = (byte[]) msg.obj;
                             byte[] headmsg = new byte[8];
                             headmsg[3] = CMD;
@@ -1101,6 +1184,8 @@ public class MsgProcess {
         void onVISID(String id);
 
         void onAudioFeatures(Integer audioTransmissionMode, Integer mediaSampleRate);
+
+        void onModuleControl(int moduleId, int statusId);
     }
 
     static class CarMsg {
