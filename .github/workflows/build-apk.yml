@@ -41,7 +41,7 @@ jobs:
 
       - name: Prepare stable debug signing key
         run: |
-          base64 --decode keystore/carprojection-debug.keystore.b64 > keystore/carprojection-debug.keystore
+          sed 's/\\n$//' keystore/carprojection-debug.keystore.b64 | base64 --decode > keystore/carprojection-debug.keystore
           keytool -list -keystore keystore/carprojection-debug.keystore -storepass android -alias carprojectiondebug
 
       - name: Make Gradle wrapper executable
