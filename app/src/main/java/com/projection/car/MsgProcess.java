@@ -136,6 +136,7 @@ public class MsgProcess {
 
     private int mVideoBit = 0;
     private int mVideoFrame = 0;
+    private boolean mCarLifeMediaAudioEnabled = true;
     private InfoListener mInfoListener;
 
     MsgProcess(Activity context, int bit, int frame, InfoListener infoListener) {
@@ -144,6 +145,8 @@ public class MsgProcess {
         mInfoListener = infoListener;
         mVideoBit = bit;
         mVideoFrame = frame;
+        mCarLifeMediaAudioEnabled = context.getSharedPreferences("set", MODE_PRIVATE)
+                .getBoolean("carlife_media_audio", true);
 
         refreshSize();
 
@@ -196,7 +199,11 @@ public class MsgProcess {
                 new MediaCodecTool.ProjectionReadyListener() {
                     @Override
                     public void onProjectionReady() {
-                        mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_START);
+                        if (mCarLifeMediaAudioEnabled) {
+                            mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_START);
+                        } else {
+                            log("[AUDIO] CarLife media audio disabled");
+                        }
                     }
                 }
         );
@@ -224,6 +231,14 @@ public class MsgProcess {
         mVideoBit = videoFps;
         mVideoFrame = videoBitrate;
         log("video config updated: " + videoFps + " fps, " + videoBitrate + " bps");
+    }
+
+    public void updateCarLifeMediaAudioEnabled(boolean enabled) {
+        mCarLifeMediaAudioEnabled = enabled;
+        log("[AUDIO] CarLife media audio setting=" + enabled + " (reconnect to renegotiate)");
+        if (!enabled) {
+            mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_STOP);
+        }
     }
 
 
@@ -355,6 +370,8 @@ public class MsgProcess {
 
         private AudioRecord mAudioRecord;
         private boolean mAudioStart;
+        private int mAudioReadCount;
+        private boolean mAudioSignalSeen;
         private FileOutputStream fileOutputStream;
 
 
@@ -368,6 +385,10 @@ public class MsgProcess {
             switch (msg.what) {
                 case AUDIO_START:
                     try {
+                        if (!mCarLifeMediaAudioEnabled) {
+                            log("[AUDIO] capture skipped because CarLife media audio is disabled");
+                            break;
+                        }
                         if (mAudioStart) {
                             break;
                         }
@@ -386,7 +407,9 @@ public class MsgProcess {
 
                             try {
                                 AudioPlaybackCaptureConfiguration config = new AudioPlaybackCaptureConfiguration.Builder(mMediaCodecTool.getMediaProjection())
-                                        .excludeUsage(AudioAttributes.USAGE_NOTIFICATION)
+                                        .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                                        .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                                        .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
                                         .build();
                                 int minBufferSize = AudioRecord.getMinBufferSize(sample, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT);
                                 mAudioRecord = new AudioRecord.Builder()
@@ -408,8 +431,15 @@ public class MsgProcess {
 
                         }
 
+                        if (mAudioRecord == null) {
+                            log("[AUDIO] AudioRecord creation failed");
+                            break;
+                        }
                         mAudioRecord.startRecording();
                         mAudioStart = true;
+                        mAudioReadCount = 0;
+                        mAudioSignalSeen = false;
+                        log("[AUDIO] capture started 48000Hz stereo PCM16");
                         mAudioReadHandler.sendEmptyMessage(AUDIO_READ);
                     } catch (Exception e) {
                         e.printStackTrace();
@@ -423,16 +453,48 @@ public class MsgProcess {
                         int len = 0;
                         try {
                             len = mAudioRecord.read(data, 0, data.length);
-                            if (!testAduio) {
-                                byte[] carLifeMsg = exportVideoMsg(MSG_MEDIA_DATA, data, len);
-                                byte[] headmsg = new byte[8];
-                                headmsg[3] = MEDIA;
-                                intToBytes2(carLifeMsg.length, headmsg, 4);//carlifemsg len
-                                CarMsg carMsg = new CarMsg(headmsg, carLifeMsg);
-                                mUsbWriteHandler.obtainMessage(MSG_WRITE_AUDIO, carMsg).sendToTarget();
+                            if (len > 0) {
+                                mAudioReadCount++;
+
+                                if (!mAudioSignalSeen && mAudioReadCount <= 150) {
+                                    int peak = 0;
+                                    for (int i = 0; i + 1 < len; i += 4) {
+                                        int sampleValue = (short) (
+                                                (data[i] & 0xFF)
+                                                        | (data[i + 1] << 8)
+                                        );
+                                        peak = Math.max(peak, Math.abs(sampleValue));
+                                    }
+                                    if (peak > 64) {
+                                        mAudioSignalSeen = true;
+                                        log(
+                                                "[AUDIO] PCM signal detected peak="
+                                                        + peak
+                                                        + " after "
+                                                        + mAudioReadCount
+                                                        + " packets"
+                                        );
+                                    } else if (mAudioReadCount == 150) {
+                                        log(
+                                                "[AUDIO] PCM is still silent after ~2s; "
+                                                        + "source app may block AudioPlaybackCapture"
+                                        );
+                                    }
+                                }
+
+                                if (!testAduio && mCarLifeMediaAudioEnabled) {
+                                    byte[] carLifeMsg = exportVideoMsg(MSG_MEDIA_DATA, data, len);
+                                    byte[] headmsg = new byte[8];
+                                    headmsg[3] = MEDIA;
+                                    intToBytes2(carLifeMsg.length, headmsg, 4);//carlifemsg len
+                                    CarMsg carMsg = new CarMsg(headmsg, carLifeMsg);
+                                    mUsbWriteHandler.obtainMessage(MSG_WRITE_AUDIO, carMsg).sendToTarget();
+                                }
                             }
 
-                            mAudioReadHandler.sendEmptyMessage(AUDIO_READ);
+                            if (mAudioStart) {
+                                mAudioReadHandler.sendEmptyMessage(AUDIO_READ);
+                            }
 
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -533,12 +595,30 @@ public class MsgProcess {
                                                                 .setKey("FOCUS_UI")
                                                                 .setValue(1)
                                                                 .build();
+                                                CarlifeFeatureConfigProto.CarlifeFeatureConfig audioMode =
+                                                        CarlifeFeatureConfigProto.CarlifeFeatureConfig.newBuilder()
+                                                                .setKey("AUDIO_TRANSMISSION_MODE")
+                                                                .setValue(mCarLifeMediaAudioEnabled ? 0 : 1)
+                                                                .build();
+                                                CarlifeFeatureConfigProto.CarlifeFeatureConfig mediaSampleRate =
+                                                        CarlifeFeatureConfigProto.CarlifeFeatureConfig.newBuilder()
+                                                                .setKey("MEDIA_SAMPLE_RATE")
+                                                                .setValue(mCarLifeMediaAudioEnabled ? 1 : 0)
+                                                                .build();
                                                 CarlifeFeatureConfigListProto.CarlifeFeatureConfigList featureRequest =
                                                         CarlifeFeatureConfigListProto.CarlifeFeatureConfigList.newBuilder()
-                                                                .setCnt(1)
+                                                                .setCnt(3)
                                                                 .addFeatureConfig(focusUi)
+                                                                .addFeatureConfig(audioMode)
+                                                                .addFeatureConfig(mediaSampleRate)
                                                                 .build();
-                                                log("[FEATURE] request FOCUS_UI=1");
+                                                log(
+                                                        "[FEATURE] request FOCUS_UI=1"
+                                                                + " AUDIO_TRANSMISSION_MODE="
+                                                                + (mCarLifeMediaAudioEnabled ? 0 : 1)
+                                                                + " MEDIA_SAMPLE_RATE="
+                                                                + (mCarLifeMediaAudioEnabled ? 1 : 0)
+                                                );
                                                 mUsbWriteHandler.obtainMessage(
                                                         MSG_CMD_MD_FEATURE_CONFIG_REQUEST,
                                                         exportCMDMsg(
@@ -845,22 +925,38 @@ public class MsgProcess {
                         case MSG_CMD_VIDEO_ENCODER_START: {
                             log("now start MSG_CMD_VIDEO_ENCODER_START");
 
-                            CarlifeMusicInitProto.CarlifeMusicInit.Builder builder = CarlifeMusicInitProto.CarlifeMusicInit.newBuilder();
-                            builder.setSampleRate(48000);
-                            builder.setChannelConfig(2);
-                            builder.setSampleFormat(16);
-                            byte[] carLifeMsg = exportVideoMsg(MSG_MEDIA_INIT, builder.build().toByteArray());
-                            byte[] headmsg = new byte[8];
-                            headmsg[3] = MEDIA;
-                            intToBytes2(carLifeMsg.length, headmsg, 4);//carlifemsg len
-                            mOutputStream.write(headmsg);
-                            log("msg=MSG_MEDIA_INIT" + "write data =" + Arrays.toString(headmsg));
-                            mOutputStream.write(carLifeMsg);
-                            log("msg=MSG_MEDIA_INIT" + "write data =" + Arrays.toString(carLifeMsg));
-                            log("write data ok  audiohandler start");
+                            if (mCarLifeMediaAudioEnabled) {
+                                CarlifeMusicInitProto.CarlifeMusicInit.Builder builder =
+                                        CarlifeMusicInitProto.CarlifeMusicInit.newBuilder();
+                                builder.setSampleRate(48000);
+                                builder.setChannelConfig(2);
+                                builder.setSampleFormat(16);
+                                byte[] carLifeMsg = exportVideoMsg(
+                                        MSG_MEDIA_INIT,
+                                        builder.build().toByteArray()
+                                );
+                                byte[] headmsg = new byte[8];
+                                headmsg[3] = MEDIA;
+                                intToBytes2(carLifeMsg.length, headmsg, 4);
+                                mOutputStream.write(headmsg);
+                                mOutputStream.write(carLifeMsg);
+                                log(
+                                        "[AUDIO] MEDIA_INIT sent 48000Hz"
+                                                + " channelConfig=2 sampleFormat=16"
+                                );
+                            } else {
+                                log("[AUDIO] MEDIA_INIT skipped; Bluetooth media mode requested");
+                            }
 
-                            //mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_START);
-                            mMediaCodecTool.startProjection(mContext, videoDataEncodeListener, REQUEST_CODE, mVISWidth, mVISHeight, mVideoBit, mVideoFrame);
+                            mMediaCodecTool.startProjection(
+                                    mContext,
+                                    videoDataEncodeListener,
+                                    REQUEST_CODE,
+                                    mVISWidth,
+                                    mVISHeight,
+                                    mVideoBit,
+                                    mVideoFrame
+                            );
                         }
                         break;
                         case MSG_WRITE_AUDIO:
