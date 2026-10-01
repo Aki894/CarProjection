@@ -263,6 +263,22 @@
                         android:textAppearance="?attr/textAppearanceBodyMedium"
                         android:textIsSelectable="true" />
 
+                    <TextView
+                        android:id="@+id/audioEncryptionProbeStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:text="@string/audio_encryption_probe_idle"
+                        android:textAppearance="?attr/textAppearanceBodyMedium" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/audioEncryptionProbeButton"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/audio_encryption_probe" />
+
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/audioTestToneButton"
                         style="@style/Widget.Material3.Button.OutlinedButton"
