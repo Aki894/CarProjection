@@ -67,7 +67,8 @@ public final class AppLogger {
             for (String line : LINES) {
                 if (!inputOnly
                         || line.contains("[TOUCH]")
-                        || line.contains("[KEY]")) {
+                        || line.contains("[KEY]")
+                        || line.contains("[PAD]")) {
                     result.add(line);
                 }
             }
