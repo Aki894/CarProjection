@@ -1,0 +1,7 @@
+syntax = "proto2";
+
+package com.baidu.carlife.protobuf;
+
+message CarlifeHuRsaPublicKeyResponse {
+    required string rsaPublicKey = 1;
+}
