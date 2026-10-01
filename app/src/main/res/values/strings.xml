@@ -25,6 +25,8 @@
     <string name="runtime_log_hint">用于真车调试 CarLife 输入；最多保留最近 300 条。</string>
     <string name="input_only">只看输入事件</string>
     <string name="clear_log">清空日志</string>
+    <string name="show_log">展开调试日志</string>
+    <string name="hide_log">收起调试日志</string>
     <string name="version_format">CarProjection %1$s · Android 10+</string>
     <string name="car_control">车机反控与屏幕节能</string>
     <string name="accessibility_des">允许 CarProjection 将 CarLife 车机输入转换为 Android 手势，并检测手机触摸以恢复屏幕亮度。</string>
@@ -32,9 +34,14 @@
     <string name="accessibility_disabled">反向控制服务未开启</string>
     <string name="open_accessibility_settings">打开无障碍设置</string>
     <string name="reverse_control">启用车机触控板反向控制</string>
-    <string name="reverse_control_summary">滑动 Remote Touch 移动虚拟光标，按下触控板执行点击。需要开启无障碍服务。</string>
-    <string name="auto_dim">30 秒无操作后降低亮度</string>
+    <string name="reverse_control_summary">滑动 Remote Touch 移动虚拟光标，按下触控板执行点击；轻触一次后快速再次触摸并滑动可模拟手指拖拽。需要开启无障碍服务。</string>
+    <string name="pointer_sensitivity">指针速度</string>
+    <string name="pointer_acceleration">指针加速度</string>
+    <string name="pointer_value_format">%1$.1f×</string>
+    <string name="auto_dim">无操作后降低亮度</string>
     <string name="auto_dim_summary">需要开启反向控制服务和“修改系统设置”权限；触摸手机后自动恢复原亮度。</string>
+    <string name="dim_delay">变暗等待时间</string>
+    <string name="dim_delay_format">%1$d 秒</string>
     <string name="grant_write_settings">允许修改亮度</string>
     <string name="write_settings_granted">亮度控制权限已授权</string>
     <string name="write_settings_missing">尚未授权亮度控制</string>
