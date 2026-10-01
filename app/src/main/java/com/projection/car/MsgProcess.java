@@ -38,6 +38,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.yftech.CarLifeTouchPadActionProto;
 import com.baidu.carlife.protobuf.CarlifeFeatureConfigProto;
 import com.baidu.carlife.protobuf.CarlifeFeatureConfigListProto;
+import com.baidu.carlife.protobuf.CarlifeHuRsaPublicKeyResponseProto;
 
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -64,6 +65,8 @@ import static com.projection.car.Utils.MSG_CMD_HU_INFO;
 import static com.projection.car.Utils.MSG_CMD_HU_PROTOCOL_VERSION;
 import static com.projection.car.Utils.MSG_CMD_MD_AUTHEN_RESULT;
 import static com.projection.car.Utils.MSG_CMD_MD_INFO;
+import static com.projection.car.Utils.MSG_CMD_MD_RSA_PUBLIC_KEY_REQUEST;
+import static com.projection.car.Utils.MSG_CMD_HU_RSA_PUBLIC_KEY_RESPONSE;
 import static com.projection.car.Utils.MSG_CMD_MODULE_CONTROL;
 import static com.projection.car.Utils.MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS;
 import static com.projection.car.Utils.MSG_CMD_STATISTIC_INFO;
@@ -143,6 +146,7 @@ public class MsgProcess {
     private Integer mHuAudioTransmissionMode;
     private Integer mHuMediaSampleRate;
     private Integer mHuContentEncryption;
+    private int mEncryptionProbeGeneration;
     private InfoListener mInfoListener;
 
     MsgProcess(Activity context, int bit, int frame, InfoListener infoListener) {
@@ -251,6 +255,34 @@ public class MsgProcess {
         }
     }
 
+    public boolean requestEncryptionProbe() {
+        if (!usbOk || mOutputStream == null) {
+            log("[ENCRYPT] probe rejected: CarLife is not connected");
+            return false;
+        }
+
+        final int generation = ++mEncryptionProbeGeneration;
+        notifyEncryptionProbe(0, 0);
+        log("[ENCRYPT] RSA public key probe request sent");
+
+        mUsbWriteHandler.obtainMessage(
+                MSG_CMD_MD_RSA_PUBLIC_KEY_REQUEST,
+                exportCMDMsg(MSG_CMD_MD_RSA_PUBLIC_KEY_REQUEST, null)
+        ).sendToTarget();
+
+        mMainHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (generation == mEncryptionProbeGeneration) {
+                    log("[ENCRYPT] RSA probe timeout");
+                    notifyEncryptionProbe(-1, 0);
+                }
+            }
+        }, 1500);
+
+        return true;
+    }
+
     public boolean playAudioTestTone() {
         if (!usbOk || mOutputStream == null) {
             log("[AUDIO-TEST] rejected: CarLife is not connected");
@@ -276,6 +308,18 @@ public class MsgProcess {
             @Override
             public void run() {
                 mInfoListener.onAudioFeatures(mode, sampleRate, contentEncryption);
+            }
+        });
+    }
+
+    private void notifyEncryptionProbe(final int state, final int keyLength) {
+        if (mInfoListener == null) {
+            return;
+        }
+        mMainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                mInfoListener.onEncryptionProbe(state, keyLength);
             }
         });
     }
@@ -849,6 +893,20 @@ public class MsgProcess {
                                                 }
                                             }
                                             break;
+                                            case MSG_CMD_HU_RSA_PUBLIC_KEY_RESPONSE: {
+                                                try {
+                                                    CarlifeHuRsaPublicKeyResponseProto.CarlifeHuRsaPublicKeyResponse response =
+                                                            CarlifeHuRsaPublicKeyResponseProto.CarlifeHuRsaPublicKeyResponse.parseFrom(msgdata);
+                                                    String key = response.getRsaPublicKey();
+                                                    mEncryptionProbeGeneration++;
+                                                    log("[ENCRYPT] HU RSA public key response len=" + key.length());
+                                                    notifyEncryptionProbe(1, key.length());
+                                                } catch (Exception e) {
+                                                    log("[ENCRYPT] HU RSA response parse error: " + e);
+                                                    notifyEncryptionProbe(-2, 0);
+                                                }
+                                            }
+                                            break;
                                             case MSG_CMD_FOCUS_CHANGE: {
                                                 try {
                                                     CarLifeTouchPadActionProto.CarlifeTouchPadFocus focus =
@@ -1055,7 +1113,8 @@ public class MsgProcess {
                         case MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS:
                         case MSG_CMD_MD_INFO:
                         case MSG_CMD_MD_AUTHEN_RESULT:
-                        case MSG_CMD_MD_FEATURE_CONFIG_REQUEST: {
+                        case MSG_CMD_MD_FEATURE_CONFIG_REQUEST:
+                        case MSG_CMD_MD_RSA_PUBLIC_KEY_REQUEST: {
                             byte[] carLifeMsg = (byte[]) msg.obj;
                             byte[] headmsg = new byte[8];
                             headmsg[3] = CMD;
@@ -1151,6 +1210,8 @@ public class MsgProcess {
                 Integer mediaSampleRate,
                 Integer contentEncryption
         );
+
+        void onEncryptionProbe(int state, int keyLength);
 
         void onModuleControl(int moduleId, int statusId);
     }
