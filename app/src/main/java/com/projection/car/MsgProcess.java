@@ -19,7 +19,7 @@ import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Message;
 import android.os.SystemClock;
-import android.support.annotation.NonNull;
+import androidx.annotation.NonNull;
 import android.util.DisplayMetrics;
 import android.view.Surface;
 import android.view.WindowManager;
@@ -169,8 +169,18 @@ public class MsgProcess {
 
     }
 
-    public void mediaPermissionOk(Activity activity, int paramInt2, Intent paramIntent) {
-        mMediaCodecTool.onActivityResult(activity, paramInt2, paramIntent);
+    public void mediaPermissionOk(Activity activity, int resultCode, Intent resultData) {
+        mMediaCodecTool.onActivityResult(
+                activity,
+                resultCode,
+                resultData,
+                new MediaCodecTool.ProjectionReadyListener() {
+                    @Override
+                    public void onProjectionReady() {
+                        mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_START);
+                    }
+                }
+        );
     }
 
     public synchronized void resetUsb() {
@@ -186,6 +196,12 @@ public class MsgProcess {
 
     public void startReadAudio() {
         mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_START);
+    }
+
+    public void updateVideoConfig(int videoFps, int videoBitrate) {
+        mVideoBit = videoFps;
+        mVideoFrame = videoBitrate;
+        log("video config updated: " + videoFps + " fps, " + videoBitrate + " bps");
     }
 
 
@@ -272,8 +288,6 @@ public class MsgProcess {
 
             log("now dispatchGesture time is " + gestureTime);
 
-            Utils.touch(mGestureMoveArray, gestureTime);
-
             GestureDescription.StrokeDescription sd = new GestureDescription.StrokeDescription(mGesturePath, 0, gestureTime);
 
             if (ForgroundService.mService != null) {
@@ -346,7 +360,7 @@ public class MsgProcess {
 
 //                        if(!(isSystemApp(mContext) || isSystemUpdateApp(mContext)) && Build.VERSION.SDK_INT >= 29) {
 
-                        if (Build.VERSION.SDK_INT >= 23) {
+                        if (Build.VERSION.SDK_INT >= 29) {
 
                             try {
                                 AudioPlaybackCaptureConfiguration config = new AudioPlaybackCaptureConfiguration.Builder(mMediaCodecTool.getMediaProjection())
