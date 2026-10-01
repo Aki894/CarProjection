@@ -73,6 +73,7 @@ import static com.projection.car.Utils.MSG_CMD_VIDEO_ENCODER_INIT_DONE;
 import static com.projection.car.Utils.MSG_CMD_VIDEO_ENCODER_START;
 import static com.projection.car.Utils.MSG_MEDIA_DATA;
 import static com.projection.car.Utils.MSG_MEDIA_INIT;
+import static com.projection.car.Utils.MSG_MEDIA_STOP;
 import static com.projection.car.Utils.MSG_TOUCH_ACTION;
 import static com.projection.car.Utils.MSG_TOUCH_CAR_HARD_KEY_CODE;
 import static com.projection.car.Utils.MSG_TOUCH_PAD_DOWN;
