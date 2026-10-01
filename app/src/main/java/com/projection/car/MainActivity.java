@@ -131,6 +131,12 @@ public class MainActivity extends AppCompatActivity {
         binding.reverseControlSwitch.setChecked(
                 preferences.getBoolean("reverse_control_enabled", true)
         );
+        binding.lockCursorDuringDragSwitch.setChecked(
+                preferences.getBoolean("lock_cursor_during_drag", false)
+        );
+        binding.carLifeMediaAudioSwitch.setChecked(
+                preferences.getBoolean("carlife_media_audio", true)
+        );
         binding.reverseControlSwitch.setOnCheckedChangeListener(
                 (buttonView, checked) -> {
                     preferences.edit()
@@ -138,6 +144,24 @@ public class MainActivity extends AppCompatActivity {
                             .apply();
                     if (!checked && ForgroundService.mService != null) {
                         ForgroundService.mService.hideCarCursor();
+                    }
+                }
+        );
+
+        binding.lockCursorDuringDragSwitch.setOnCheckedChangeListener(
+                (buttonView, checked) ->
+                        preferences.edit()
+                                .putBoolean("lock_cursor_during_drag", checked)
+                                .apply()
+        );
+
+        binding.carLifeMediaAudioSwitch.setOnCheckedChangeListener(
+                (buttonView, checked) -> {
+                    preferences.edit()
+                            .putBoolean("carlife_media_audio", checked)
+                            .apply();
+                    if (msgProcess != null) {
+                        msgProcess.updateCarLifeMediaAudioEnabled(checked);
                     }
                 }
         );
@@ -597,7 +621,7 @@ public class MainActivity extends AppCompatActivity {
                     .getPackageInfo(getPackageName(), 0)
                     .versionName;
         } catch (PackageManager.NameNotFoundException e) {
-            return "0.2.3";
+            return "0.2.4";
         }
     }
 
