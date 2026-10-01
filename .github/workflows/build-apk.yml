@@ -12,6 +12,7 @@ on:
       - "gradle.properties"
       - "gradle/**"
       - "gradlew"
+      - "keystore/**"
       - ".github/workflows/build-apk.yml"
 
 permissions:
@@ -37,6 +38,11 @@ jobs:
       - name: Install required Android SDK packages
         run: |
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Prepare stable debug signing key
+        run: |
+          base64 --decode keystore/carprojection-debug.keystore.b64 > keystore/carprojection-debug.keystore
+          keytool -list -keystore keystore/carprojection-debug.keystore -storepass android -alias carprojectiondebug
 
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
