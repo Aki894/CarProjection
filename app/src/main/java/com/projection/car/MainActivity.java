@@ -18,6 +18,7 @@ import android.os.Looper;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.provider.Settings;
+import android.view.View;
 import android.widget.Toast;
 
 import androidx.annotation.Nullable;
@@ -115,6 +116,16 @@ public class MainActivity extends AppCompatActivity {
                 (buttonView, checked) -> renderLog()
         );
         binding.clearLogButton.setOnClickListener(v -> AppLogger.clear());
+        binding.toggleLogButton.setOnClickListener(v -> {
+            boolean show = binding.logCard.getVisibility() != View.VISIBLE;
+            binding.logCard.setVisibility(show ? View.VISIBLE : View.GONE);
+            binding.toggleLogButton.setText(
+                    show ? R.string.hide_log : R.string.show_log
+            );
+            if (show) {
+                renderLog();
+            }
+        });
 
         preferences = getSharedPreferences("set", MODE_PRIVATE);
         binding.reverseControlSwitch.setChecked(
@@ -128,6 +139,57 @@ public class MainActivity extends AppCompatActivity {
                     if (!checked && ForgroundService.mService != null) {
                         ForgroundService.mService.hideCarCursor();
                     }
+                }
+        );
+
+        float pointerSensitivity = preferences.getFloat(
+                "pointer_sensitivity",
+                1.8f
+        );
+        float pointerAcceleration = preferences.getFloat(
+                "pointer_acceleration",
+                0.6f
+        );
+
+        binding.pointerSensitivitySlider.setValue(pointerSensitivity);
+        binding.pointerAccelerationSlider.setValue(pointerAcceleration);
+        updatePointerLabels(pointerSensitivity, pointerAcceleration);
+
+        binding.pointerSensitivitySlider.addOnChangeListener(
+                (slider, value, fromUser) -> {
+                    preferences.edit()
+                            .putFloat("pointer_sensitivity", value)
+                            .apply();
+                    updatePointerLabels(
+                            value,
+                            binding.pointerAccelerationSlider.getValue()
+                    );
+                }
+        );
+        binding.pointerAccelerationSlider.addOnChangeListener(
+                (slider, value, fromUser) -> {
+                    preferences.edit()
+                            .putFloat("pointer_acceleration", value)
+                            .apply();
+                    updatePointerLabels(
+                            binding.pointerSensitivitySlider.getValue(),
+                            value
+                    );
+                }
+        );
+
+        int dimDelaySeconds = BrightnessController.getDimDelaySeconds(this);
+        binding.dimDelaySlider.setValue(dimDelaySeconds);
+        binding.dimDelayValue.setText(
+                getString(R.string.dim_delay_format, dimDelaySeconds)
+        );
+        binding.dimDelaySlider.addOnChangeListener(
+                (slider, value, fromUser) -> {
+                    int seconds = Math.round(value);
+                    binding.dimDelayValue.setText(
+                            getString(R.string.dim_delay_format, seconds)
+                    );
+                    BrightnessController.setDimDelaySeconds(this, seconds);
                 }
         );
 
@@ -435,6 +497,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void scheduleLogRender() {
+        if (binding == null
+                || binding.logCard.getVisibility() != View.VISIBLE) {
+            return;
+        }
         if (logRenderScheduled) {
             return;
         }
@@ -443,7 +509,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void renderLog() {
-        if (binding == null) {
+        if (binding == null
+                || binding.logCard.getVisibility() != View.VISIBLE) {
             return;
         }
 
@@ -500,6 +567,18 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 
+    private void updatePointerLabels(
+            float sensitivity,
+            float acceleration
+    ) {
+        binding.pointerSensitivityValue.setText(
+                getString(R.string.pointer_value_format, sensitivity)
+        );
+        binding.pointerAccelerationValue.setText(
+                getString(R.string.pointer_value_format, acceleration)
+        );
+    }
+
     private void requestWriteSettingsPermission() {
         if (BrightnessController.canWriteSettings(this)) {
             return;
@@ -518,7 +597,7 @@ public class MainActivity extends AppCompatActivity {
                     .getPackageInfo(getPackageName(), 0)
                     .versionName;
         } catch (PackageManager.NameNotFoundException e) {
-            return "0.2.1";
+            return "0.2.2";
         }
     }
 
