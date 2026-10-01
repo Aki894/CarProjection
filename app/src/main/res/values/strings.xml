@@ -10,7 +10,7 @@
     <string name="head_unit_unknown">尚未获取</string>
     <string name="resolution_unknown">等待车机协商</string>
     <string name="save_settings">保存设置</string>
-    <string name="settings_saved">设置已保存，将在下一次投屏时生效</string>
+    <string name="settings_saved">设置已保存</string>
     <string name="keep_screen_awake">投屏时保持手机屏幕常亮</string>
     <string name="keep_screen_awake_summary">避免手机自动锁屏导致车机画面中断</string>
     <string name="video_settings">视频设置</string>
@@ -19,7 +19,19 @@
     <string name="video_bitrate">视频码率 (bps)</string>
     <string name="resolution">车机分辨率</string>
     <string name="head_unit_id">车机 ID</string>
-    <string name="auto_connect_hint">连接支持 CarLife 的 USB 口后，应用会自动完成协议握手。车机请求视频时，Android 会弹出一次系统屏幕录制授权。</string>
+    <string name="auto_connect_hint">连接支持 CarLife 的 USB 口后，应用会自动完成协议握手。车机请求视频时，Android 会弹出系统屏幕录制授权。</string>
     <string name="audio_permission_denied">未授予录音权限：视频投屏仍可用，但系统音频捕获可能不可用。</string>
     <string name="version_format">CarProjection %1$s · Android 10+</string>
+    <string name="car_control">车机反控与屏幕节能</string>
+    <string name="accessibility_des">允许 CarProjection 将 CarLife 车机输入转换为 Android 手势，并检测手机触摸以恢复屏幕亮度。</string>
+    <string name="accessibility_enabled">反向控制服务已开启</string>
+    <string name="accessibility_disabled">反向控制服务未开启</string>
+    <string name="open_accessibility_settings">打开无障碍设置</string>
+    <string name="auto_dim">30 秒无操作后降低亮度</string>
+    <string name="auto_dim_summary">需要开启反向控制服务和“修改系统设置”权限；触摸手机后自动恢复原亮度。</string>
+    <string name="grant_write_settings">允许修改亮度</string>
+    <string name="write_settings_granted">亮度控制权限已授权</string>
+    <string name="write_settings_missing">尚未授权亮度控制</string>
+    <string name="enable_accessibility_first">请先开启“CarProjection 车机反控”无障碍服务</string>
+    <string name="grant_write_settings_first">请先允许 CarProjection 修改系统设置</string>
 </resources>
