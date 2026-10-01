@@ -35,6 +35,8 @@ import com.example.car.CarlifeStatisticsInfoProto;
 import com.example.car.CarlifeVideoEncoderInfoProto;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.yftech.CarLifeTouchPadActionProto;
+import com.baidu.carlife.protobuf.CarlifeFeatureConfigProto;
+import com.baidu.carlife.protobuf.CarlifeFeatureConfigListProto;
 
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -52,6 +54,9 @@ import static com.projection.car.Utils.KEYCODE_SEEK_ADD;
 import static com.projection.car.Utils.KEYCODE_SEEK_SUB;
 import static com.projection.car.Utils.MEDIA;
 import static com.projection.car.Utils.MSG_CMD_FOREGROUND;
+import static com.projection.car.Utils.MSG_CMD_FOCUS_CHANGE;
+import static com.projection.car.Utils.MSG_CMD_MD_FEATURE_CONFIG_REQUEST;
+import static com.projection.car.Utils.MSG_CMD_HU_FEATURE_CONFIG_RESPONSE;
 import static com.projection.car.Utils.MSG_CMD_HU_INFO;
 import static com.projection.car.Utils.MSG_CMD_HU_PROTOCOL_VERSION;
 import static com.projection.car.Utils.MSG_CMD_MD_AUTHEN_RESULT;
@@ -517,6 +522,25 @@ public class MsgProcess {
                                                 builder.setRelease("10");
                                                 builder.setHost("c4-miui-ota-bd47.bj");
                                                 mUsbWriteHandler.obtainMessage(MSG_CMD_MD_INFO, exportCMDMsg(MSG_CMD_MD_INFO, builder.build().toByteArray())).sendToTarget();
+
+                                                CarlifeFeatureConfigProto.CarlifeFeatureConfig focusUi =
+                                                        CarlifeFeatureConfigProto.CarlifeFeatureConfig.newBuilder()
+                                                                .setKey("FOCUS_UI")
+                                                                .setValue(1)
+                                                                .build();
+                                                CarlifeFeatureConfigListProto.CarlifeFeatureConfigList featureRequest =
+                                                        CarlifeFeatureConfigListProto.CarlifeFeatureConfigList.newBuilder()
+                                                                .setCnt(1)
+                                                                .addFeatureConfig(focusUi)
+                                                                .build();
+                                                log("[FEATURE] request FOCUS_UI=1");
+                                                mUsbWriteHandler.obtainMessage(
+                                                        MSG_CMD_MD_FEATURE_CONFIG_REQUEST,
+                                                        exportCMDMsg(
+                                                                MSG_CMD_MD_FEATURE_CONFIG_REQUEST,
+                                                                featureRequest.toByteArray()
+                                                        )
+                                                ).sendToTarget();
                                             }
                                             break;
                                             case MSG_CMD_VIDEO_ENCODER_INIT: {
@@ -545,6 +569,35 @@ public class MsgProcess {
                                             break;
                                             case MSG_CMD_VIDEO_ENCODER_START: {
                                                 mUsbWriteHandler.obtainMessage(MSG_CMD_VIDEO_ENCODER_START).sendToTarget();
+                                            }
+                                            break;
+                                            case MSG_CMD_HU_FEATURE_CONFIG_RESPONSE: {
+                                                try {
+                                                    CarlifeFeatureConfigListProto.CarlifeFeatureConfigList response =
+                                                            CarlifeFeatureConfigListProto.CarlifeFeatureConfigList.parseFrom(msgdata);
+                                                    log("[FEATURE] HU response cnt=" + response.getCnt());
+                                                    for (CarlifeFeatureConfigProto.CarlifeFeatureConfig feature
+                                                            : response.getFeatureConfigList()) {
+                                                        log(
+                                                                "[FEATURE] HU "
+                                                                        + feature.getKey()
+                                                                        + "="
+                                                                        + feature.getValue()
+                                                        );
+                                                    }
+                                                } catch (Exception e) {
+                                                    log("[FEATURE] response parse error: " + e);
+                                                }
+                                            }
+                                            break;
+                                            case MSG_CMD_FOCUS_CHANGE: {
+                                                try {
+                                                    CarLifeTouchPadActionProto.CarlifeTouchPadFocus focus =
+                                                            CarLifeTouchPadActionProto.CarlifeTouchPadFocus.parseFrom(msgdata);
+                                                    log("[FOCUS] CHANGE ts=" + focus.getTimestamp() + " channel=CMD");
+                                                } catch (Exception e) {
+                                                    log("[FOCUS] CHANGE rawLen=" + msgdata.length + " channel=CMD parseError=" + e);
+                                                }
                                             }
                                             break;
                                             case MSG_CMD_STATISTIC_INFO: {
@@ -600,6 +653,16 @@ public class MsgProcess {
                                                     genarateGesture(action.getAction(), action.getX(), action.getY());
                                                 } catch (Exception e) {
                                                     e.printStackTrace();
+                                                }
+                                            }
+                                            break;
+                                            case MSG_CMD_FOCUS_CHANGE: {
+                                                try {
+                                                    CarLifeTouchPadActionProto.CarlifeTouchPadFocus focus =
+                                                            CarLifeTouchPadActionProto.CarlifeTouchPadFocus.parseFrom(msgdata);
+                                                    log("[FOCUS] CHANGE ts=" + focus.getTimestamp() + " channel=TOUCH");
+                                                } catch (Exception e) {
+                                                    log("[FOCUS] CHANGE rawLen=" + msgdata.length + " channel=TOUCH parseError=" + e);
                                                 }
                                             }
                                             break;
@@ -711,7 +774,8 @@ public class MsgProcess {
                     switch (msg.what) {
                         case MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS:
                         case MSG_CMD_MD_INFO:
-                        case MSG_CMD_MD_AUTHEN_RESULT: {
+                        case MSG_CMD_MD_AUTHEN_RESULT:
+                        case MSG_CMD_MD_FEATURE_CONFIG_REQUEST: {
                             byte[] carLifeMsg = (byte[]) msg.obj;
                             byte[] headmsg = new byte[8];
                             headmsg[3] = CMD;
