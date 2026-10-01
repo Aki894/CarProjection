@@ -8,7 +8,7 @@ import static com.projection.car.Utils.log;
 /**
  * Optional accessibility service used for:
  * 1) dispatching reverse-control gestures received from the CarLife head unit;
- * 2) observing local phone touch interaction to restore brightness after auto-dim.
+ * 2) observing local phone interactions to restore brightness after auto-dim.
  *
  * Projection itself does not depend on this service.
  */
@@ -32,8 +32,21 @@ public class ForgroundService extends AccessibilityService {
             return;
         }
 
-        if (event.getEventType() == AccessibilityEvent.TYPE_TOUCH_INTERACTION_START) {
+        int type = event.getEventType();
+        if (type == AccessibilityEvent.TYPE_TOUCH_INTERACTION_START
+                || type == AccessibilityEvent.TYPE_TOUCH_INTERACTION_END
+                || type == AccessibilityEvent.TYPE_VIEW_CLICKED
+                || type == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED
+                || type == AccessibilityEvent.TYPE_VIEW_SCROLLED
+                || type == AccessibilityEvent.TYPE_VIEW_SELECTED
+                || type == AccessibilityEvent.TYPE_VIEW_FOCUSED) {
             BrightnessController.onUserActivity(this);
+        }
+    }
+
+    public void onCarPadDown() {
+        if (remoteCursorController != null) {
+            remoteCursorController.onPadDown();
         }
     }
 
@@ -43,10 +56,22 @@ public class ForgroundService extends AccessibilityService {
         }
     }
 
+    public void onCarPadUp() {
+        if (remoteCursorController != null) {
+            remoteCursorController.onPadUp();
+        }
+    }
+
     public void onCarOk() {
         if (remoteCursorController != null) {
             remoteCursorController.click();
         }
+    }
+
+    public void onCarBack() {
+        BrightnessController.suppressAccessibilityActivityFor(500);
+        boolean accepted = performGlobalAction(GLOBAL_ACTION_BACK);
+        log("[CONTROL] BACK accepted=" + accepted);
     }
 
     public void hideCarCursor() {
