@@ -50,6 +50,7 @@ import static com.projection.car.Utils.ACTION_DOWN;
 import static com.projection.car.Utils.ACTION_MOVE;
 import static com.projection.car.Utils.ACTION_UP;
 import static com.projection.car.Utils.CMD;
+import static com.projection.car.Utils.KEYCODE_BACK;
 import static com.projection.car.Utils.KEYCODE_OK;
 import static com.projection.car.Utils.KEYCODE_SEEK_ADD;
 import static com.projection.car.Utils.KEYCODE_SEEK_SUB;
@@ -639,6 +640,12 @@ public class MsgProcess {
                                                         }
                                                     }
                                                     break;
+                                                    case KEYCODE_BACK: {
+                                                        if (ForgroundService.mService != null) {
+                                                            ForgroundService.mService.onCarBack();
+                                                        }
+                                                    }
+                                                    break;
                                                     case KEYCODE_SEEK_SUB: {
                                                         previosSong();
                                                     }
@@ -687,6 +694,9 @@ public class MsgProcess {
                                                     mPadAbsDx = 0;
                                                     mPadAbsDy = 0;
                                                     log("[PAD] DOWN ts=" + down.getTimestamp());
+                                                    if (ForgroundService.mService != null) {
+                                                        ForgroundService.mService.onCarPadDown();
+                                                    }
                                                 } catch (Exception e) {
                                                     log("[PAD] DOWN parse error: " + e);
                                                 }
@@ -721,6 +731,9 @@ public class MsgProcess {
                                                     CarLifeTouchPadActionProto.CarlifeTouchPadUp up =
                                                             CarLifeTouchPadActionProto.CarlifeTouchPadUp.parseFrom(msgdata);
                                                     log("[PAD] UP ts=" + up.getTimestamp());
+                                                    if (ForgroundService.mService != null) {
+                                                        ForgroundService.mService.onCarPadUp();
+                                                    }
                                                     long duration = mPadStartTimestamp == 0
                                                             ? 0
                                                             : up.getTimestamp() - mPadStartTimestamp;
