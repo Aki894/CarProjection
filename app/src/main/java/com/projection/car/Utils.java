@@ -72,6 +72,13 @@ public class Utils {
     public static final int MSG_TOUCH_UI_ACTION_SOUND = 0x00060009;
     public static final int MSG_TOUCH_ACTION_BEGIN = 0x0006800A;
 
+    // Lexus Remote Touch / TouchPad custom messages
+    public static final int MSG_TOUCH_PAD_DOWN = 0x0001005A;
+    public static final int MSG_TOUCH_PAD_MOVE = 0x0001005B;
+    public static final int MSG_TOUCH_PAD_UP = 0x0001005C;
+    public static final int MSG_TOUCH_PAD_PINCH = 0x0001005D;
+    public static final int MSG_CMD_FOCUS_CHANGE = 0x0001005E;
+
 
     // 硬按键消息
     public static final int KEYCODE_HOME = 0x00000001;
