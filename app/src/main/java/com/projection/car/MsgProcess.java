@@ -70,6 +70,7 @@ import static com.projection.car.Utils.MSG_CMD_MD_RSA_PUBLIC_KEY_REQUEST;
 import static com.projection.car.Utils.MSG_CMD_HU_RSA_PUBLIC_KEY_RESPONSE;
 import static com.projection.car.Utils.MSG_CMD_MODULE_CONTROL;
 import static com.projection.car.Utils.MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS;
+import static com.projection.car.Utils.MSG_CMD_SCREEN_ON;
 import static com.projection.car.Utils.MSG_CMD_STATISTIC_INFO;
 import static com.projection.car.Utils.MSG_CMD_VIDEO_ENCODER_INIT;
 import static com.projection.car.Utils.MSG_CMD_VIDEO_ENCODER_INIT_DONE;
