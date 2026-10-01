@@ -245,6 +245,68 @@
                         android:text="@string/reverse_control_summary"
                         android:textAppearance="?attr/textAppearanceBodySmall" />
 
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="18dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/pointer_sensitivity"
+                            android:textAppearance="?attr/textAppearanceBodyMedium" />
+
+                        <TextView
+                            android:id="@+id/pointerSensitivityValue"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="?attr/textAppearanceLabelLarge"
+                            tools:text="1.8×" />
+                    </LinearLayout>
+
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/pointerSensitivitySlider"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:value="1.8"
+                        android:valueFrom="0.8"
+                        android:valueTo="3.0"
+                        app:stepSize="0.1" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/pointer_acceleration"
+                            android:textAppearance="?attr/textAppearanceBodyMedium" />
+
+                        <TextView
+                            android:id="@+id/pointerAccelerationValue"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="?attr/textAppearanceLabelLarge"
+                            tools:text="0.6×" />
+                    </LinearLayout>
+
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/pointerAccelerationSlider"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:value="0.6"
+                        android:valueFrom="0.0"
+                        android:valueTo="1.5"
+                        app:stepSize="0.1" />
+
                     <TextView
                         android:id="@+id/writeSettingsStatus"
                         android:layout_width="match_parent"
@@ -276,6 +338,37 @@
                         android:layout_marginEnd="4dp"
                         android:text="@string/auto_dim_summary"
                         android:textAppearance="?attr/textAppearanceBodySmall" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/dim_delay"
+                            android:textAppearance="?attr/textAppearanceBodyMedium" />
+
+                        <TextView
+                            android:id="@+id/dimDelayValue"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="?attr/textAppearanceLabelLarge"
+                            tools:text="20 秒" />
+                    </LinearLayout>
+
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/dimDelaySlider"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:value="20"
+                        android:valueFrom="15"
+                        android:valueTo="30"
+                        app:stepSize="1" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -289,9 +382,19 @@
                 android:textAppearance="?attr/textAppearanceTitleMedium"
                 android:textStyle="bold" />
 
-            <com.google.android.material.card.MaterialCardView
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/toggleLogButton"
+                style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:text="@string/show_log" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/logCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:visibility="gone"
                 app:cardCornerRadius="16dp"
                 app:cardElevation="0dp"
                 app:strokeWidth="1dp">
