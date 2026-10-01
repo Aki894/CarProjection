@@ -50,6 +50,7 @@ import static com.projection.car.Utils.ACTION_DOWN;
 import static com.projection.car.Utils.ACTION_MOVE;
 import static com.projection.car.Utils.ACTION_UP;
 import static com.projection.car.Utils.CMD;
+import static com.projection.car.Utils.KEYCODE_OK;
 import static com.projection.car.Utils.KEYCODE_SEEK_ADD;
 import static com.projection.car.Utils.KEYCODE_SEEK_SUB;
 import static com.projection.car.Utils.MEDIA;
@@ -207,6 +208,9 @@ public class MsgProcess {
             mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_STOP);
             mMediaCodecTool.stopProjection();
             mUsbWriteHandler.removeCallbacksAndMessages(null);
+            if (ForgroundService.mService != null) {
+                ForgroundService.mService.hideCarCursor();
+            }
         }
 
     }
@@ -629,6 +633,12 @@ public class MsgProcess {
                                                 int carKeyCode = keyCode.getKeycode();
                                                 log("[KEY] " + Utils.carKeyName(carKeyCode) + " (" + carKeyCode + ")");
                                                 switch (carKeyCode) {
+                                                    case KEYCODE_OK: {
+                                                        if (ForgroundService.mService != null) {
+                                                            ForgroundService.mService.onCarOk();
+                                                        }
+                                                    }
+                                                    break;
                                                     case KEYCODE_SEEK_SUB: {
                                                         previosSong();
                                                     }
@@ -698,6 +708,9 @@ public class MsgProcess {
                                                                     + " dy=" + dy
                                                                     + " ts=" + move.getTimestamp()
                                                     );
+                                                    if (ForgroundService.mService != null) {
+                                                        ForgroundService.mService.onCarPadMove(dx, dy);
+                                                    }
                                                 } catch (Exception e) {
                                                     log("[PAD] MOVE parse error: " + e);
                                                 }
