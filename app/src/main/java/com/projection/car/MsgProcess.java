@@ -222,7 +222,6 @@ public class MsgProcess {
             log("resetUsb");
             usbOk = false;
             mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_STOP);
-            mMusicModuleRunning = false;
             mMediaCodecTool.stopProjection();
             mUsbWriteHandler.removeCallbacksAndMessages(null);
             if (ForgroundService.mService != null) {
