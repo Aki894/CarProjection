@@ -193,8 +193,10 @@ final class RemoteCursorController {
 
                 if (dragArmed && liveDragActive && padMoved) {
                     dragFingerDown = false;
-                    dragPendingX = cursorX;
-                    dragPendingY = cursorY;
+                    if (!isCursorLockedDuringDrag()) {
+                        dragPendingX = cursorX;
+                        dragPendingY = cursorY;
+                    }
                     lastTapUpTime = 0;
 
                     // If a segment is still running, its callback will send
