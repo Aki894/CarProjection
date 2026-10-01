@@ -57,7 +57,6 @@
                         android:layout_marginTop="8dp"
                         android:text="@string/auto_connect_hint"
                         android:textAppearance="?attr/textAppearanceBodyMedium" />
-
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -113,7 +112,6 @@
                         android:text="@string/head_unit_unknown"
                         android:textAppearance="?attr/textAppearanceBodyMedium"
                         android:textIsSelectable="true" />
-
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -189,7 +187,78 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="18dp"
                         android:text="@string/save_settings" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:layout_marginBottom="8dp"
+                android:text="@string/car_control"
+                android:textAppearance="?attr/textAppearanceTitleMedium"
+                android:textStyle="bold" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="0dp"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="18dp">
+
+                    <TextView
+                        android:id="@+id/accessibilityStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/accessibility_disabled"
+                        android:textAppearance="?attr/textAppearanceBodyLarge"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/accessibilityButton"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/open_accessibility_settings" />
+
+                    <TextView
+                        android:id="@+id/writeSettingsStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="18dp"
+                        android:text="@string/write_settings_missing"
+                        android:textAppearance="?attr/textAppearanceBodyMedium" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/writeSettingsButton"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/grant_write_settings" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/autoDimSwitch"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/auto_dim" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="4dp"
+                        android:layout_marginTop="2dp"
+                        android:layout_marginEnd="4dp"
+                        android:text="@string/auto_dim_summary"
+                        android:textAppearance="?attr/textAppearanceBodySmall" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -201,8 +270,6 @@
                 android:gravity="center"
                 android:textAppearance="?attr/textAppearanceBodySmall"
                 tools:text="CarProjection 0.2.0 · Android 10+" />
-
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
-
 </LinearLayout>
