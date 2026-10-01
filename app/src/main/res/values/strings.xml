@@ -1,4 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">car</string>
-    <string name="accessibility_des">车机投屏服务，部分功能需要开启服务</string>
+    <string name="app_name">CarProjection</string>
+    <string name="app_subtitle">Android → CarLife</string>
+    <string name="status_waiting">等待车机连接</string>
+    <string name="status_connected">CarLife 已连接</string>
+    <string name="status_projecting">正在投屏</string>
+    <string name="status_projection_stopped">投屏已停止</string>
+    <string name="status_projection_denied">未授予屏幕录制权限</string>
+    <string name="head_unit_unknown">尚未获取</string>
+    <string name="resolution_unknown">等待车机协商</string>
+    <string name="save_settings">保存设置</string>
+    <string name="settings_saved">设置已保存，将在下一次投屏时生效</string>
+    <string name="keep_screen_awake">投屏时保持手机屏幕常亮</string>
+    <string name="keep_screen_awake_summary">避免手机自动锁屏导致车机画面中断</string>
+    <string name="video_settings">视频设置</string>
+    <string name="connection_info">连接信息</string>
+    <string name="video_fps">帧率 (FPS)</string>
+    <string name="video_bitrate">视频码率 (bps)</string>
+    <string name="resolution">车机分辨率</string>
+    <string name="head_unit_id">车机 ID</string>
+    <string name="auto_connect_hint">连接支持 CarLife 的 USB 口后，应用会自动完成协议握手。车机请求视频时，Android 会弹出一次系统屏幕录制授权。</string>
+    <string name="audio_permission_denied">未授予录音权限：视频投屏仍可用，但系统音频捕获可能不可用。</string>
+    <string name="version_format">CarProjection %1$s · Android 10+</string>
 </resources>
