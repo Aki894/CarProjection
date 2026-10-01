@@ -1,6 +1,8 @@
 package com.projection.car;
 
 import android.accessibilityservice.GestureDescription;
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -8,6 +10,7 @@ import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.DisplayMetrics;
 import android.view.Gravity;
 import android.view.View;
@@ -17,7 +20,14 @@ final class RemoteCursorController {
 
     private static final String PREFS = "set";
     private static final String KEY_ENABLED = "reverse_control_enabled";
-    private static final float DEFAULT_SENSITIVITY = 1.5f;
+    private static final String KEY_SENSITIVITY = "pointer_sensitivity";
+    private static final String KEY_ACCELERATION = "pointer_acceleration";
+
+    private static final float DEFAULT_SENSITIVITY = 1.8f;
+    private static final float DEFAULT_ACCELERATION = 0.6f;
+
+    private static final long DOUBLE_TAP_WINDOW_MS = 450L;
+    private static final long TAP_MAX_DURATION_MS = 500L;
 
     private final ForgroundService service;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -32,11 +42,54 @@ final class RemoteCursorController {
     private int screenHeight;
     private int cursorSize;
 
+    private long padDownTime;
+    private long lastTapUpTime;
+    private boolean padMoved;
+    private boolean sawOkDuringContact;
+    private boolean dragArmed;
+    private Path dragPath;
+    private long dragStartTime;
+
     RemoteCursorController(ForgroundService service) {
         this.service = service;
         this.windowManager = (WindowManager) service.getSystemService(
-                android.content.Context.WINDOW_SERVICE
+                Context.WINDOW_SERVICE
         );
+    }
+
+    void onPadDown() {
+        if (!isEnabled()) {
+            return;
+        }
+
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                ensureCursor();
+
+                long now = SystemClock.uptimeMillis();
+                padDownTime = now;
+                padMoved = false;
+                sawOkDuringContact = false;
+
+                dragArmed = lastTapUpTime > 0
+                        && now - lastTapUpTime <= DOUBLE_TAP_WINDOW_MS;
+
+                if (dragArmed) {
+                    dragStartTime = now;
+                    dragPath = new Path();
+                    dragPath.moveTo(cursorX, cursorY);
+                    Utils.log(
+                            "[CONTROL] DRAG armed x="
+                                    + Math.round(cursorX)
+                                    + " y="
+                                    + Math.round(cursorY)
+                    );
+                } else {
+                    dragPath = null;
+                }
+            }
+        });
     }
 
     void moveBy(final int dx, final int dy) {
@@ -50,17 +103,57 @@ final class RemoteCursorController {
                 ensureCursor();
                 refreshBounds();
 
+                float gain = calculateGain(dx, dy);
                 cursorX = clamp(
-                        cursorX + dx * DEFAULT_SENSITIVITY,
+                        cursorX + dx * gain,
                         cursorSize / 2f,
                         screenWidth - cursorSize / 2f
                 );
                 cursorY = clamp(
-                        cursorY + dy * DEFAULT_SENSITIVITY,
+                        cursorY + dy * gain,
                         cursorSize / 2f,
                         screenHeight - cursorSize / 2f
                 );
+
+                padMoved = true;
+
+                if (dragArmed && dragPath != null) {
+                    dragPath.lineTo(cursorX, cursorY);
+                }
+
                 updateCursorPosition();
+            }
+        });
+    }
+
+    void onPadUp() {
+        if (!isEnabled()) {
+            return;
+        }
+
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                long now = SystemClock.uptimeMillis();
+                long duration = padDownTime > 0 ? now - padDownTime : 0;
+
+                if (dragArmed && padMoved && dragPath != null) {
+                    dispatchDrag(now);
+                    lastTapUpTime = 0;
+                } else if (!padMoved
+                        && !sawOkDuringContact
+                        && duration <= TAP_MAX_DURATION_MS) {
+                    lastTapUpTime = now;
+                    Utils.log("[CONTROL] TAP registered for drag");
+                } else {
+                    lastTapUpTime = 0;
+                }
+
+                dragArmed = false;
+                dragPath = null;
+                padDownTime = 0;
+                padMoved = false;
+                sawOkDuringContact = false;
             }
         });
     }
@@ -74,6 +167,8 @@ final class RemoteCursorController {
             @Override
             public void run() {
                 ensureCursor();
+                sawOkDuringContact = true;
+                lastTapUpTime = 0;
 
                 Path path = new Path();
                 path.moveTo(cursorX, cursorY);
@@ -119,13 +214,67 @@ final class RemoteCursorController {
     }
 
     void destroy() {
+        mainHandler.removeCallbacksAndMessages(null);
         removeCursor();
+    }
+
+    private void dispatchDrag(long now) {
+        if (dragPath == null) {
+            return;
+        }
+
+        long duration = Math.max(
+                120L,
+                Math.min(1200L, now - dragStartTime)
+        );
+
+        GestureDescription.StrokeDescription stroke =
+                new GestureDescription.StrokeDescription(
+                        dragPath,
+                        0,
+                        duration
+                );
+
+        boolean accepted = service.dispatchGesture(
+                new GestureDescription.Builder()
+                        .addStroke(stroke)
+                        .build(),
+                null,
+                null
+        );
+
+        Utils.log(
+                "[CONTROL] DRAG duration="
+                        + duration
+                        + "ms accepted="
+                        + accepted
+        );
+    }
+
+    private float calculateGain(int dx, int dy) {
+        SharedPreferences prefs = service.getSharedPreferences(
+                PREFS,
+                Context.MODE_PRIVATE
+        );
+        float sensitivity = prefs.getFloat(
+                KEY_SENSITIVITY,
+                DEFAULT_SENSITIVITY
+        );
+        float acceleration = prefs.getFloat(
+                KEY_ACCELERATION,
+                DEFAULT_ACCELERATION
+        );
+
+        float magnitude = (float) Math.hypot(dx, dy);
+        float normalized = Math.min(1.5f, magnitude / 70f);
+
+        return sensitivity * (1f + acceleration * normalized);
     }
 
     private boolean isEnabled() {
         return service.getSharedPreferences(
                 PREFS,
-                android.content.Context.MODE_PRIVATE
+                Context.MODE_PRIVATE
         ).getBoolean(KEY_ENABLED, true);
     }
 
@@ -219,6 +368,13 @@ final class RemoteCursorController {
         params = null;
         cursorX = 0;
         cursorY = 0;
+
+        padDownTime = 0;
+        lastTapUpTime = 0;
+        padMoved = false;
+        sawOkDuringContact = false;
+        dragArmed = false;
+        dragPath = null;
     }
 
     private int dp(int value) {
@@ -242,7 +398,7 @@ final class RemoteCursorController {
 
         private float scale = 1f;
 
-        CursorView(android.content.Context context) {
+        CursorView(Context context) {
             super(context);
             fillPaint.setColor(Color.WHITE);
             fillPaint.setStyle(Paint.Style.FILL);
