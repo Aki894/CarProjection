@@ -48,6 +48,18 @@ public class MainActivity extends AppCompatActivity {
     private SharedPreferences preferences;
     private boolean receiverRegistered;
 
+    private final AppLogger.Listener logListener = new AppLogger.Listener() {
+        @Override
+        public void onLogUpdated() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    renderLog();
+                }
+            });
+        }
+    };
+
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -89,6 +101,12 @@ public class MainActivity extends AppCompatActivity {
 
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
+
+        AppLogger.setListener(logListener);
+        binding.inputOnlySwitch.setOnCheckedChangeListener(
+                (buttonView, checked) -> renderLog()
+        );
+        binding.clearLogButton.setOnClickListener(v -> AppLogger.clear());
 
         preferences = getSharedPreferences("set", MODE_PRIVATE);
         usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
@@ -209,6 +227,8 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        AppLogger.clearListener(logListener);
+
         if (receiverRegistered) {
             try {
                 unregisterReceiver(usbReceiver);
@@ -389,6 +409,27 @@ public class MainActivity extends AppCompatActivity {
         if (binding.autoDimSwitch.isChecked() != autoDimEnabled) {
             binding.autoDimSwitch.setChecked(autoDimEnabled);
         }
+    }
+
+    private void renderLog() {
+        if (binding == null) {
+            return;
+        }
+
+        boolean inputOnly = binding.inputOnlySwitch.isChecked();
+        java.util.List<String> lines = AppLogger.snapshot(inputOnly);
+        StringBuilder builder = new StringBuilder();
+        for (String line : lines) {
+            builder.append(line).append('\n');
+        }
+
+        binding.logText.setText(builder.toString());
+        binding.logScroll.post(new Runnable() {
+            @Override
+            public void run() {
+                binding.logScroll.fullScroll(android.view.View.FOCUS_DOWN);
+            }
+        });
     }
 
     private void requestWriteSettingsPermission() {
