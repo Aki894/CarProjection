@@ -302,6 +302,32 @@ public class MainActivity extends AppCompatActivity {
                                 modeText + " · " + sampleText
                         );
                     }
+
+                    @Override
+                    public void onModuleControl(int moduleId, int statusId) {
+                        String moduleName = moduleId == 3
+                                ? "Music"
+                                : "Module " + moduleId;
+                        String statusName;
+                        if (statusId == 0) {
+                            statusName = "IDLE";
+                        } else if (statusId == 1) {
+                            statusName = "RUNNING";
+                        } else {
+                            statusName = String.valueOf(statusId);
+                        }
+                        binding.audioModuleStatusValue.setText(
+                                "HU → MD: "
+                                        + moduleName
+                                        + " / "
+                                        + statusName
+                                        + " ("
+                                        + moduleId
+                                        + ", "
+                                        + statusId
+                                        + ")"
+                        );
+                    }
                 }
         );
 
@@ -506,6 +532,7 @@ public class MainActivity extends AppCompatActivity {
         binding.resolutionValue.setText(R.string.resolution_unknown);
         binding.headUnitIdValue.setText(R.string.head_unit_unknown);
         binding.audioHuStatusValue.setText(R.string.audio_hu_waiting);
+        binding.audioModuleStatusValue.setText(R.string.audio_module_waiting);
     }
 
     private void closeAccessory() {
@@ -679,7 +706,7 @@ public class MainActivity extends AppCompatActivity {
                     .getPackageInfo(getPackageName(), 0)
                     .versionName;
         } catch (PackageManager.NameNotFoundException e) {
-            return "0.2.5";
+            return "0.2.6";
         }
     }
 
