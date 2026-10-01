@@ -305,17 +305,32 @@ public class MainActivity extends AppCompatActivity {
 
                     @Override
                     public void onModuleControl(int moduleId, int statusId) {
-                        String moduleName = moduleId == 3
-                                ? "Music"
-                                : "Module " + moduleId;
+                        String moduleName;
                         String statusName;
-                        if (statusId == 0) {
-                            statusName = "IDLE";
-                        } else if (statusId == 1) {
-                            statusName = "RUNNING";
+
+                        if (moduleId == 3) {
+                            moduleName = "Music";
+                            statusName = statusId == 0
+                                    ? "IDLE"
+                                    : statusId == 1
+                                            ? "RUNNING"
+                                            : String.valueOf(statusId);
+                        } else if (moduleId == 6) {
+                            moduleName = "MIC";
+                            if (statusId == 0) {
+                                statusName = "USE_VEHICLE_MIC";
+                            } else if (statusId == 1) {
+                                statusName = "USE_MOBILE_MIC";
+                            } else if (statusId == 2) {
+                                statusName = "NOT_SUPPORTED";
+                            } else {
+                                statusName = String.valueOf(statusId);
+                            }
                         } else {
+                            moduleName = "Module " + moduleId;
                             statusName = String.valueOf(statusId);
                         }
+
                         binding.audioModuleStatusValue.setText(
                                 "HU → MD: "
                                         + moduleName
@@ -706,7 +721,7 @@ public class MainActivity extends AppCompatActivity {
                     .getPackageInfo(getPackageName(), 0)
                     .versionName;
         } catch (PackageManager.NameNotFoundException e) {
-            return "0.2.6";
+            return "0.2.7";
         }
     }
 
