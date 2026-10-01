@@ -108,6 +108,13 @@ public class MsgProcess {
     private ArrayList<Float> mGestureMoveArray = new ArrayList<>();
     private long mGestureStartTime = 0;
 
+    private long mPadStartTimestamp = 0;
+    private int mPadMoveCount = 0;
+    private long mPadSumDx = 0;
+    private long mPadSumDy = 0;
+    private long mPadAbsDx = 0;
+    private long mPadAbsDy = 0;
+
     private float mVISWidth = 1280;
     private float mVISHeight = 720;
     private float mMobileWidth = 1920;
@@ -600,6 +607,12 @@ public class MsgProcess {
                                                 try {
                                                     CarLifeTouchPadActionProto.CarlifeTouchPadDown down =
                                                             CarLifeTouchPadActionProto.CarlifeTouchPadDown.parseFrom(msgdata);
+                                                    mPadStartTimestamp = down.getTimestamp();
+                                                    mPadMoveCount = 0;
+                                                    mPadSumDx = 0;
+                                                    mPadSumDy = 0;
+                                                    mPadAbsDx = 0;
+                                                    mPadAbsDy = 0;
                                                     log("[PAD] DOWN ts=" + down.getTimestamp());
                                                 } catch (Exception e) {
                                                     log("[PAD] DOWN parse error: " + e);
@@ -610,9 +623,16 @@ public class MsgProcess {
                                                 try {
                                                     CarLifeTouchPadActionProto.CarlifeTouchPadMove move =
                                                             CarLifeTouchPadActionProto.CarlifeTouchPadMove.parseFrom(msgdata);
+                                                    int dx = move.getDeltaX();
+                                                    int dy = move.getDeltaY();
+                                                    mPadMoveCount++;
+                                                    mPadSumDx += dx;
+                                                    mPadSumDy += dy;
+                                                    mPadAbsDx += Math.abs((long) dx);
+                                                    mPadAbsDy += Math.abs((long) dy);
                                                     log(
-                                                            "[PAD] MOVE dx=" + move.getDeltaX()
-                                                                    + " dy=" + move.getDeltaY()
+                                                            "[PAD] MOVE dx=" + dx
+                                                                    + " dy=" + dy
                                                                     + " ts=" + move.getTimestamp()
                                                     );
                                                 } catch (Exception e) {
@@ -625,6 +645,22 @@ public class MsgProcess {
                                                     CarLifeTouchPadActionProto.CarlifeTouchPadUp up =
                                                             CarLifeTouchPadActionProto.CarlifeTouchPadUp.parseFrom(msgdata);
                                                     log("[PAD] UP ts=" + up.getTimestamp());
+                                                    long duration = mPadStartTimestamp == 0
+                                                            ? 0
+                                                            : up.getTimestamp() - mPadStartTimestamp;
+                                                    String candidate = mPadMoveCount == 0
+                                                            ? " TAP_CANDIDATE"
+                                                            : "";
+                                                    log(
+                                                            "[PAD-GESTURE]"
+                                                                    + candidate
+                                                                    + " duration=" + duration + "ms"
+                                                                    + " moves=" + mPadMoveCount
+                                                                    + " sumDx=" + mPadSumDx
+                                                                    + " sumDy=" + mPadSumDy
+                                                                    + " absDx=" + mPadAbsDx
+                                                                    + " absDy=" + mPadAbsDy
+                                                    );
                                                 } catch (Exception e) {
                                                     log("[PAD] UP parse error: " + e);
                                                 }
