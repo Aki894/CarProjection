@@ -13,6 +13,8 @@ import android.hardware.usb.UsbAccessory;
 import android.hardware.usb.UsbManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.provider.Settings;
@@ -48,15 +50,21 @@ public class MainActivity extends AppCompatActivity {
     private SharedPreferences preferences;
     private boolean receiverRegistered;
 
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private boolean logRenderScheduled;
+
+    private final Runnable logRenderRunnable = new Runnable() {
+        @Override
+        public void run() {
+            logRenderScheduled = false;
+            renderLog();
+        }
+    };
+
     private final AppLogger.Listener logListener = new AppLogger.Listener() {
         @Override
         public void onLogUpdated() {
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    renderLog();
-                }
-            });
+            scheduleLogRender();
         }
     };
 
@@ -109,6 +117,20 @@ public class MainActivity extends AppCompatActivity {
         binding.clearLogButton.setOnClickListener(v -> AppLogger.clear());
 
         preferences = getSharedPreferences("set", MODE_PRIVATE);
+        binding.reverseControlSwitch.setChecked(
+                preferences.getBoolean("reverse_control_enabled", true)
+        );
+        binding.reverseControlSwitch.setOnCheckedChangeListener(
+                (buttonView, checked) -> {
+                    preferences.edit()
+                            .putBoolean("reverse_control_enabled", checked)
+                            .apply();
+                    if (!checked && ForgroundService.mService != null) {
+                        ForgroundService.mService.hideCarCursor();
+                    }
+                }
+        );
+
         usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
         BrightnessController.init(this);
 
@@ -228,6 +250,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         AppLogger.clearListener(logListener);
+        uiHandler.removeCallbacks(logRenderRunnable);
 
         if (receiverRegistered) {
             try {
@@ -411,10 +434,27 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void scheduleLogRender() {
+        if (logRenderScheduled) {
+            return;
+        }
+        logRenderScheduled = true;
+        uiHandler.postDelayed(logRenderRunnable, 100);
+    }
+
     private void renderLog() {
         if (binding == null) {
             return;
         }
+
+        final int pageScrollY = binding.pageScroll.getScrollY();
+        final int logScrollY = binding.logScroll.getScrollY();
+        final int oldLogMax = Math.max(
+                0,
+                binding.logText.getHeight() - binding.logScroll.getHeight()
+        );
+        final boolean stickLogToBottom =
+                oldLogMax == 0 || logScrollY >= oldLogMax - dp(24);
 
         boolean inputOnly = binding.inputOnlySwitch.isChecked();
         java.util.List<String> lines = AppLogger.snapshot(inputOnly);
@@ -424,12 +464,40 @@ public class MainActivity extends AppCompatActivity {
         }
 
         binding.logText.setText(builder.toString());
-        binding.logScroll.post(new Runnable() {
+        binding.logText.post(new Runnable() {
             @Override
             public void run() {
-                binding.logScroll.fullScroll(android.view.View.FOCUS_DOWN);
+                if (binding == null) {
+                    return;
+                }
+
+                int newLogMax = Math.max(
+                        0,
+                        binding.logText.getHeight() - binding.logScroll.getHeight()
+                );
+                binding.logScroll.scrollTo(
+                        0,
+                        stickLogToBottom
+                                ? newLogMax
+                                : Math.min(logScrollY, newLogMax)
+                );
+
+                binding.pageScroll.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (binding != null) {
+                            binding.pageScroll.scrollTo(0, pageScrollY);
+                        }
+                    }
+                });
             }
         });
+    }
+
+    private int dp(int value) {
+        return Math.round(
+                value * getResources().getDisplayMetrics().density
+        );
     }
 
     private void requestWriteSettingsPermission() {
@@ -450,7 +518,7 @@ public class MainActivity extends AppCompatActivity {
                     .getPackageInfo(getPackageName(), 0)
                     .versionName;
         } catch (PackageManager.NameNotFoundException e) {
-            return "0.2.0";
+            return "0.2.1";
         }
     }
 
