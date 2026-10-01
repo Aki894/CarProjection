@@ -558,12 +558,12 @@ public class MsgProcess {
 
                                         }
                                     } else if (msg_type == TOUCH) {
-                                        log("read TOUCH data = " + Arrays.toString(msgdata));
                                         switch (type) {
                                             case MSG_TOUCH_CAR_HARD_KEY_CODE: {
                                                 CarlifeCarHardKeyCodeProto.CarlifeCarHardKeyCode keyCode = CarlifeCarHardKeyCodeProto.CarlifeCarHardKeyCode.parseFrom(msgdata);
-                                                log("keycode = " + keyCode.getKeycode());
-                                                switch (keyCode.getKeycode()) {
+                                                int carKeyCode = keyCode.getKeycode();
+                                                log("[KEY] " + Utils.carKeyName(carKeyCode) + " (" + carKeyCode + ")");
+                                                switch (carKeyCode) {
                                                     case KEYCODE_SEEK_SUB: {
                                                         previosSong();
                                                     }
@@ -579,8 +579,13 @@ public class MsgProcess {
                                             case MSG_TOUCH_ACTION: {
                                                 try {
                                                     CarlifeTouchActionProto.CarlifeTouchAction action = CarlifeTouchActionProto.CarlifeTouchAction.parseFrom(msgdata);
+                                                    log(
+                                                            "[TOUCH] "
+                                                                    + Utils.touchActionName(action.getAction())
+                                                                    + " x=" + action.getX()
+                                                                    + " y=" + action.getY()
+                                                    );
                                                     genarateGesture(action.getAction(), action.getX(), action.getY());
-                                                    log("encoderInfo = " + action.getX() + ", " + action.getY() + ", " + action.getAction());
                                                 } catch (Exception e) {
                                                     e.printStackTrace();
                                                 }
