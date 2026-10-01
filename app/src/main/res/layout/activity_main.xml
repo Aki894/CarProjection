@@ -196,6 +196,46 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="24dp"
                 android:layout_marginBottom="8dp"
+                android:text="@string/audio_settings"
+                android:textAppearance="?attr/textAppearanceTitleMedium"
+                android:textStyle="bold" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="0dp"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="18dp">
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/carLifeMediaAudioSwitch"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:checked="true"
+                        android:text="@string/carlife_media_audio" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="4dp"
+                        android:layout_marginTop="2dp"
+                        android:layout_marginEnd="4dp"
+                        android:text="@string/carlife_media_audio_summary"
+                        android:textAppearance="?attr/textAppearanceBodySmall" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:layout_marginBottom="8dp"
                 android:text="@string/car_control"
                 android:textAppearance="?attr/textAppearanceTitleMedium"
                 android:textStyle="bold" />
@@ -243,6 +283,22 @@
                         android:layout_marginTop="2dp"
                         android:layout_marginEnd="4dp"
                         android:text="@string/reverse_control_summary"
+                        android:textAppearance="?attr/textAppearanceBodySmall" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/lockCursorDuringDragSwitch"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:text="@string/lock_cursor_during_drag" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="4dp"
+                        android:layout_marginTop="2dp"
+                        android:layout_marginEnd="4dp"
+                        android:text="@string/lock_cursor_during_drag_summary"
                         android:textAppearance="?attr/textAppearanceBodySmall" />
 
                     <LinearLayout
