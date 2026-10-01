@@ -15,8 +15,10 @@
     <string name="keep_screen_awake_summary">避免手机自动锁屏导致车机画面中断</string>
     <string name="video_settings">视频设置</string>
     <string name="audio_settings">音频设置</string>
+    <string name="tts_audio_compatibility">TTS 兼容音频（16 kHz 单声道）</string>
+    <string name="tts_audio_compatibility_summary">MEDIA 无声的车机可开启：将允许捕获的应用音频通过导航/TTS 通道播放，音乐音质会降低。导航语音能否捕获取决于导航应用。切换后请拔插 USB 重连。</string>
     <string name="carlife_media_audio">媒体音频通过 CarLife USB</string>
-    <string name="carlife_media_audio_summary">推荐开启。通话仍可走蓝牙 HFP，音乐/视频音频通过 CarLife MEDIA 通道发送到车机。</string>
+    <string name="carlife_media_audio_summary">常规模式：音乐/视频音频通过 CarLife MEDIA 通道发送到车机；关闭后请求蓝牙音频。TTS 兼容模式开启时优先使用 USB TTS 通道。</string>
     <string name="audio_hu_status">车机音频协商</string>
     <string name="audio_hu_waiting">等待车机返回 Audio Feature</string>
     <string name="audio_hu_unknown">HU 未返回 AUDIO_TRANSMISSION_MODE / MEDIA_SAMPLE_RATE</string>

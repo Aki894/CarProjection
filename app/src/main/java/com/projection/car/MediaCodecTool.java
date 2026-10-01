@@ -322,6 +322,9 @@ public class MediaCodecTool {
             log("MediaProjection stopped");
             mediaProjection = null;
             releaseEncoderResources();
+            if (projectionReadyListener != null) {
+                projectionReadyListener.onProjectionStopped();
+            }
 
             if (appContext != null) {
                 BrightnessController.setProjectionActive(
@@ -339,5 +342,6 @@ public class MediaCodecTool {
 
     public interface ProjectionReadyListener {
         void onProjectionReady();
+        void onProjectionStopped();
     }
 }

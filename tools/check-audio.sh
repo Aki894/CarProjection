@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+project_dir="$(cd "$(dirname "$0")/.." && pwd)"
+audio_test_dir="$(mktemp -d)"
+trap 'rm -rf "$audio_test_dir"' EXIT
+java -m jdk.compiler/com.sun.tools.javac.Main -d "$audio_test_dir" \
+  "$project_dir/app/src/main/java/com/projection/car/Pcm48StereoTo16Mono.java" \
+  "$project_dir/tools/AudioResamplerCheck.java"
+java -cp "$audio_test_dir" com.projection.car.AudioResamplerCheck

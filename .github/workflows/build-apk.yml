@@ -13,6 +13,7 @@ on:
       - "gradle/**"
       - "gradlew"
       - "keystore/**"
+      - "tools/**"
       - ".github/workflows/build-apk.yml"
 
 permissions:
@@ -54,6 +55,9 @@ jobs:
           ./gradlew --version
           echo "ANDROID_HOME=$ANDROID_HOME"
           sdkmanager --list_installed | grep -E "platforms;android-36|build-tools;36.0.0" || true
+
+      - name: Check streaming audio conversion
+        run: bash tools/check-audio.sh
 
       - name: Build debug APK
         run: |

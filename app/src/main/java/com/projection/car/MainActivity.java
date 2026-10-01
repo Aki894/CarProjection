@@ -137,6 +137,19 @@ public class MainActivity extends AppCompatActivity {
         binding.carLifeMediaAudioSwitch.setChecked(
                 preferences.getBoolean("carlife_media_audio", true)
         );
+        binding.ttsAudioCompatibilitySwitch.setChecked(
+                preferences.getBoolean("tts_audio_compatibility", false)
+        );
+        updateAudioModeControls();
+        binding.ttsAudioCompatibilitySwitch.setOnCheckedChangeListener(
+                (buttonView, checked) -> {
+                    preferences.edit().putBoolean("tts_audio_compatibility", checked).apply();
+                    updateAudioModeControls();
+                    if (msgProcess != null) {
+                        msgProcess.updateTtsAudioCompatibilityEnabled(checked);
+                    }
+                }
+        );
         binding.reverseControlSwitch.setOnCheckedChangeListener(
                 (buttonView, checked) -> {
                     preferences.edit()
@@ -758,6 +771,13 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 
+    private void updateAudioModeControls() {
+        boolean tts = binding.ttsAudioCompatibilitySwitch.isChecked();
+        binding.carLifeMediaAudioSwitch.setEnabled(!tts);
+        binding.audioTestToneButton.setEnabled(!tts);
+        binding.audioTest44kButton.setEnabled(!tts);
+    }
+
     private void runAudioTest(boolean started) {
         if (started) {
             Toast.makeText(
@@ -792,7 +812,7 @@ public class MainActivity extends AppCompatActivity {
                     .getPackageInfo(getPackageName(), 0)
                     .versionName;
         } catch (PackageManager.NameNotFoundException e) {
-            return "0.3.1";
+            return "0.3.2";
         }
     }
 
