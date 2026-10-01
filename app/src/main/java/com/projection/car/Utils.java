@@ -19,6 +19,7 @@ public class Utils {
     public static final byte CMD = 1;
     public static final byte VIDEO = 2;
     public static final byte MEDIA = 3;
+    public static final byte TTS = 4;
     public static final byte TOUCH = 6;
 
     public static final int ACTION_DOWN = 0;
@@ -59,6 +60,11 @@ public class Utils {
     public static final int MSG_MEDIA_RESUME_PLAY = 0x00030004;
     public static final int MSG_MEDIA_SEEK_TO = 0x00030005;
     public static final int MSG_MEDIA_DATA = 0x00030006;
+
+    // Navigation/TTS audio channel
+    public static final int MSG_NAVI_TTS_INIT = 0x00040001;
+    public static final int MSG_NAVI_TTS_END = 0x00040002;
+    public static final int MSG_NAVI_TTS_DATA = 0x00040003;
 
     public static final int MSG_VIDEO_DATA = 0x00020001;
 
