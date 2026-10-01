@@ -264,7 +264,8 @@ public class MainActivity extends AppCompatActivity {
                     @Override
                     public void onAudioFeatures(
                             Integer audioTransmissionMode,
-                            Integer mediaSampleRate
+                            Integer mediaSampleRate,
+                            Integer contentEncryption
                     ) {
                         if (audioTransmissionMode == null
                                 && mediaSampleRate == null) {
@@ -298,8 +299,23 @@ public class MainActivity extends AppCompatActivity {
                                     + mediaSampleRate;
                         }
 
+                        String encryptionText;
+                        if (contentEncryption == null) {
+                            encryptionText = "Encrypt=?";
+                        } else if (contentEncryption == 0) {
+                            encryptionText = "Encrypt=OFF (0)";
+                        } else if (contentEncryption == 1) {
+                            encryptionText = "Encrypt=ON (1)";
+                        } else {
+                            encryptionText = "Encrypt=" + contentEncryption;
+                        }
+
                         binding.audioHuStatusValue.setText(
-                                modeText + " · " + sampleText
+                                modeText
+                                        + " · "
+                                        + sampleText
+                                        + " · "
+                                        + encryptionText
                         );
                     }
 
@@ -721,7 +737,7 @@ public class MainActivity extends AppCompatActivity {
                     .getPackageInfo(getPackageName(), 0)
                     .versionName;
         } catch (PackageManager.NameNotFoundException e) {
-            return "0.2.7";
+            return "0.2.8";
         }
     }
 
