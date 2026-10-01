@@ -27,7 +27,10 @@
     <string name="audio_encryption_probe_running">RSA：正在等待 HU 公钥响应…</string>
     <string name="audio_encryption_probe_supported">RSA：HU 已返回公钥（支持）</string>
     <string name="audio_encryption_probe_no_response">RSA：1.5 秒无响应</string>
-    <string name="audio_test_tone">播放 2 秒 CarLife 测试音</string>
+    <string name="audio_test_tone">MEDIA 48 kHz 测试音</string>
+    <string name="audio_test_media_44k">MEDIA 44.1 kHz 测试音</string>
+    <string name="audio_test_tts">TTS 16 kHz 测试音</string>
+    <string name="audio_test_tts_summary">走独立的 CarLife 导航/TTS 音频通道（channel 4），用于判断 USB PCM 链路是否能触发车机音响。</string>
     <string name="audio_test_tone_summary">直接生成 1 kHz / 48 kHz / 双声道 PCM16，不经过 Android PlaybackCapture，用于验证 USB MEDIA 链路。</string>
     <string name="audio_test_not_connected">请先连接 CarLife 车机</string>
     <string name="audio_test_started">正在向车机发送测试音…</string>
