@@ -189,6 +189,11 @@ public class MainActivity extends AppCompatActivity {
         binding.lockCursorDuringDragSwitch.setChecked(
                 preferences.getBoolean("lock_cursor_during_drag", false)
         );
+        binding.directCarPlayInputSwitch.setChecked(preferences.getBoolean("direct_carplay_input", false));
+        binding.directCarPlayInputSwitch.setOnCheckedChangeListener((button, checked) -> {
+            preferences.edit().putBoolean("direct_carplay_input", checked).apply();
+            if (msgProcess != null) msgProcess.updateDirectCarPlayInputEnabled(checked);
+        });
         binding.directCarPlayVideoSwitch.setChecked(preferences.getBoolean("direct_carplay_video", false));
         binding.directCarPlayVideoSwitch.setOnCheckedChangeListener((button, checked) -> {
             preferences.edit().putBoolean("direct_carplay_video", checked).apply();
@@ -366,7 +371,7 @@ public class MainActivity extends AppCompatActivity {
                 getString(R.string.version_format, getVersionName())
         );
 
-        msgProcess = new MsgProcess(
+        msgProcess = CarLifeSessionService.acquire(
                 this,
                 videoFps,
                 videoBitrate,
@@ -702,10 +707,11 @@ public class MainActivity extends AppCompatActivity {
             receiverRegistered = false;
         }
         if (msgProcess != null) {
-            msgProcess.release();
+            msgProcess.detachUi(this);
+            if (!msgProcess.isUsbConnected()) msgProcess.release();
             msgProcess = null;
         }
-        closeAccessory(); // Closing the descriptor also unblocks a pending USB read.
+        // The foreground service owns a connected descriptor; closing the UI must not close USB.
         super.onDestroy();
     }
 
@@ -755,7 +761,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void openOrRequestPermission(UsbAccessory accessory) {
         if (!isCarLifeAccessory(accessory) || msgProcess == null) return;
-        if (fileDescriptor != null && msgProcess.isUsbConnected() && accessory.equals(usbAccessory)) {
+        if (CarLifeSessionService.isOpen(accessory)) {
             log("[USB] duplicate attach/open ignored");
             return;
         }
@@ -795,7 +801,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (msgProcess == null || !isCarLifeAccessory(accessory)) return;
-        if (fileDescriptor != null && msgProcess.isUsbConnected() && accessory.equals(usbAccessory)) return;
+        if (CarLifeSessionService.isOpen(accessory)) return;
         msgProcess.resetUsb("ACCESSORY_REOPEN");
         closeAccessory();
         usbAccessory = accessory;
@@ -816,7 +822,10 @@ public class MainActivity extends AppCompatActivity {
         FileDescriptor fd = fileDescriptor.getFileDescriptor();
         FileInputStream inputStream = new FileInputStream(fd);
         FileOutputStream outputStream = new FileOutputStream(fd);
+        CarLifeSessionService.takeDescriptor(fileDescriptor, accessory);
+        fileDescriptor = null;
         msgProcess.startProjection(inputStream, outputStream);
+        CarLifeSessionService.start(this);
 
         binding.statusTitle.setText(R.string.status_connected);
         binding.statusDetail.setText(
@@ -853,6 +862,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void closeAccessory() {
+        CarLifeSessionService.closeDescriptor();
         if (fileDescriptor != null) {
             try {
                 fileDescriptor.close();
@@ -1011,6 +1021,7 @@ public class MainActivity extends AppCompatActivity {
                 .append("Android ").append(Build.VERSION.RELEASE)
                 .append(" / SDK ").append(Build.VERSION.SDK_INT)
                 .append(" / ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n')
+                .append("Direct CarPlay input=").append(binding.directCarPlayInputSwitch.isChecked()).append('\n')
                 .append("Direct CarPlay video=").append(binding.directCarPlayVideoSwitch.isChecked()).append('\n')
                 .append("Direct CarPlay audio=").append(binding.directCarPlayAudioSwitch.isChecked()).append('\n')
                 .append("TTS compatibility=").append(binding.ttsAudioCompatibilitySwitch.isChecked())

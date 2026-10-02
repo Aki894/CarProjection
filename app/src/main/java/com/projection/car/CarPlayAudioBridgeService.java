@@ -23,10 +23,21 @@ public final class CarPlayAudioBridgeService extends Service {
     private final Binder binder = new Binder() {
         @Override protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
             if (code == INTERFACE_TRANSACTION) { reply.writeString(DESCRIPTOR); return true; }
-            if (code < FIRST_CALL_TRANSACTION || code > FIRST_CALL_TRANSACTION + 5)
+            if (code < FIRST_CALL_TRANSACTION || code > FIRST_CALL_TRANSACTION + 7)
                 return super.onTransact(code, data, reply, flags);
             data.enforceInterface(DESCRIPTOR);
             enforceClient();
+            if (code == FIRST_CALL_TRANSACTION + 6) {
+                IBinder inputOwner = data.readStrongBinder();
+                int[][] events = CarPlayInputBridge.poll(Binder.getCallingUid(), inputOwner, data.readInt() != 0);
+                reply.writeNoException(); reply.writeInt(events.length);
+                for (int[] event : events) for (int value : event) reply.writeInt(value);
+                return true;
+            }
+            if (code == FIRST_CALL_TRANSACTION + 7) {
+                CarPlayInputBridge.close(Binder.getCallingUid(), data.readStrongBinder());
+                reply.writeNoException(); return true;
+            }
             if (code == FIRST_CALL_TRANSACTION + 1) {
                 reply.writeNoException(); reply.writeInt(CarPlayAudioBridge.ready() ? 1 : 0); return true;
             }

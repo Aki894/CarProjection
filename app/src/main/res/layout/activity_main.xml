@@ -233,6 +233,15 @@
                     android:padding="18dp">
 
                     <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/directCarPlayInputSwitch"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/direct_carplay_input" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/direct_carplay_input_summary" />
+                    <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/directCarPlayVideoSwitch"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"

@@ -99,6 +99,8 @@
     <string name="permission_result_expired">本次投屏授权已过期或未能启动，请重新连接后再次授权。</string>
     <string name="direct_carplay_audio">DiPlay 直接音频（实验）</string>
     <string name="direct_carplay_audio_summary">需要桥接版 DiPlay。直接接收音乐与语音，混音后经 TTS 单声道输出；不捕获手机播放声音。关闭可恢复原投屏音频。视频与反控仍使用现有方式。</string>
+    <string name="direct_carplay_input">CarPlay 直接控制（实验）</string>
+    <string name="direct_carplay_input_summary">触控板移动 CarPlay 焦点，按下或双击确认，双击后滑动发送滚轮，返回键直接回传。与直接视频同时开启时无需录屏和无障碍权限。更改后重新插拔 USB。旧光标控制可关闭此项恢复。</string>
     <string name="direct_carplay_video">DiPlay 直接视频（实验）</string>
-    <string name="direct_carplay_video_summary">按车机尺寸协商 H.264，绕过手机画面再次编码。先连接车机并开启此项，再连接 CarPlay。尺寸变化需重连 CarPlay。不含手机光标浮层；不兼容时回退屏幕投影。</string>
+    <string name="direct_carplay_video_summary">按车机尺寸协商 H.264，绕过手机画面再次编码。先连接车机并开启此项，再连接 CarPlay。尺寸变化需重连 CarPlay。直接控制使用 CarPlay 焦点高亮。关闭直接控制并重连 USB 可恢复屏幕投影。</string>
 </resources>

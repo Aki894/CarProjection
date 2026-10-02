@@ -116,7 +116,8 @@ public class MsgProcess {
     private HandlerThread mUsbWriteThread;
     private InputStream mInputStream;
     private FileOutputStream mOutputStream;
-    private Activity mContext;
+    private Context mContext;
+    private java.lang.ref.WeakReference<Activity> mUiActivity = new java.lang.ref.WeakReference<>(null);
 
 
     private Handler mUsbReadHandler;
@@ -126,12 +127,20 @@ public class MsgProcess {
     private final CarPlayAudioBridge.Sink mBridgeSink = new CarPlayAudioBridge.Sink() {
         @Override public boolean ready() {
             return mDirectCarPlayAudioEnabled && usbOk && !mReleased && !mAudioTestToneActive
-                    && mMediaCodecTool != null && mMediaCodecTool.getMediaProjection() != null;
+                    && mMediaCodecTool != null && videoSessionReady();
         }
         @Override public void start() { postAudio(AudioHandler.AUDIO_START); }
     };
     private final AtomicInteger mPendingAudioPackets = new AtomicInteger();
     private volatile boolean mDirectCarPlayVideoEnabled;
+    private volatile boolean mDirectCarPlayInputEnabled;
+    private boolean headlessMode() { return mDirectCarPlayVideoEnabled && mDirectCarPlayInputEnabled; }
+    private boolean videoSessionReady() { return mHuVideoStarted && (headlessMode() || mMediaCodecTool.getMediaProjection() != null); }
+    private boolean directInputReady() { return mDirectCarPlayInputEnabled && usbOk && mHuVideoStarted && CarPlayInputBridge.ready(); }
+    public void updateDirectCarPlayInputEnabled(boolean enabled) {
+        mDirectCarPlayInputEnabled = enabled; CarPlayInputBridge.reset();
+        if (usbOk) resetUsb("INPUT_MODE_CHANGED reconnect USB");
+    }
     private volatile boolean mHuVideoInitialized, mHuVideoStarted, mDirectVideoActive;
     private volatile int mVideoSourceEpoch, mVideoRecoverySequence;
     private long mDirectVideoToken, mDirectVideoFrames, mDirectVideoBytes;
@@ -142,7 +151,7 @@ public class MsgProcess {
         @Override public int[] status() {
             boolean target = mDirectCarPlayVideoEnabled && usbOk && !mReleased && mHuVideoInitialized;
             boolean ready = target && mHuVideoStarted && mMediaCodecTool != null
-                    && mMediaCodecTool.getMediaProjection() != null;
+                    && videoSessionReady();
             return new int[]{ready ? 1 : 0, target ? (int)mVISWidth : 0,
                     target ? (int)mVISHeight : 0, Math.max(1, Math.min(60, mVideoBit)), mVideoRecoverySequence};
         }
@@ -190,7 +199,7 @@ public class MsgProcess {
                 if (mDirectVideoActive) {
                     resetVideoSource(false);
                     if (mMediaCodecTool != null) mMediaCodecTool.requestKeyFrame();
-                    log("[BRIDGE] video fallback=screen projection");
+                    log(headlessMode() ? "[BRIDGE] video waiting for DiPlay producer" : "[BRIDGE] video fallback=screen projection");
                 }
             }
         }
@@ -260,14 +269,18 @@ public class MsgProcess {
     private Integer mHuMediaSampleRate;
     private Integer mHuContentEncryption;
     private int mEncryptionProbeGeneration;
-    private InfoListener mInfoListener;
+    private volatile InfoListener mInfoListener;
+    void attachUi(Activity activity, InfoListener listener) { mUiActivity = new java.lang.ref.WeakReference<>(activity); mInfoListener = listener; refreshSize(); notifyAudioFeatureStatus(); }
+    void detachUi(Activity activity) { if (mUiActivity.get() == activity) { mUiActivity.clear(); mInfoListener = null; } }
 
     MsgProcess(Activity context, int bit, int frame, InfoListener infoListener) {
 
-        mContext = context;
+        mContext = context.getApplicationContext();
+        mUiActivity = new java.lang.ref.WeakReference<>(context);
         mInfoListener = infoListener;
         mVideoBit = bit;
         mVideoFrame = frame;
+        mDirectCarPlayInputEnabled = context.getSharedPreferences("set", MODE_PRIVATE).getBoolean("direct_carplay_input", false);
         mDirectCarPlayVideoEnabled = context.getSharedPreferences("set", MODE_PRIVATE)
                 .getBoolean("direct_carplay_video", false);
         mDirectCarPlayAudioEnabled = context.getSharedPreferences("set", MODE_PRIVATE)
@@ -308,6 +321,7 @@ public class MsgProcess {
         mHuContentEncryption = null;
         notifyAudioFeatureStatus();
         usbOk = true;
+        CarPlayInputBridge.reset();
         mHuVideoInitialized = mHuVideoStarted = false;
         CarPlayVideoBridge.attach(mVideoBridgeSink);
         CarPlayAudioBridge.attach(mBridgeSink);
@@ -344,7 +358,7 @@ public class MsgProcess {
             synchronized (MsgProcess.this) {
                 if (!usbOk || mReleased || generation != mUsbGeneration) return;
                 long now = SystemClock.elapsedRealtime();
-                if (mHuVideoStarted && mMediaCodecTool.getMediaProjection() != null
+                if (videoSessionReady()
                         && mVideoHeartbeat.due(now)) {
                     mUsbWriteHandler.obtainMessage(Utils.MSG_WRITE_VIDEO_HEARTBEAT, generation, 0).sendToTarget();
                 }
@@ -398,6 +412,8 @@ public class MsgProcess {
         mAudioReadHandler.obtainMessage(what, mUsbGeneration, 0).sendToTarget();
     }
 
+    boolean isReleased() { return mReleased; }
+    boolean hasUi() { return mUiActivity.get() != null; }
     public boolean isUsbConnected() { return usbOk && !mReleased; }
     public synchronized String lastDisconnectReason() { return mLastDisconnectReason; }
 
@@ -418,6 +434,8 @@ public class MsgProcess {
                 + " videoSentFrames=" + mVideoFramesWritten + " videoFrameIdleMs=" + (now - mLastVideoFrameAt)
                 + " videoHeartbeats=" + mVideoHeartbeatsWritten);
         usbOk = false;
+        CarPlayInputBridge.reset();
+        CarLifeSessionService.stop(mContext);
         mHuVideoInitialized = mHuVideoStarted = false;
         CarPlayVideoBridge.invalidate();
         CarPlayAudioBridge.invalidate();
@@ -434,6 +452,7 @@ public class MsgProcess {
         try { if (mInputStream != null) mInputStream.close(); } catch (IOException ignored) {}
         mOutputStream = null;
         mInputStream = null;
+        CarLifeSessionService.closeDescriptor();
         mMediaCodecTool.stopProjection();
         if (ForgroundService.mService != null) ForgroundService.mService.hideCarCursor();
         mMainHandler.post(() -> {
@@ -448,6 +467,7 @@ public class MsgProcess {
     }
 
     public void release() {
+        if (mReleased) return;
         mReleased = true;
         CarPlayVideoBridge.detach(mVideoBridgeSink);
         CarPlayAudioBridge.detach(mBridgeSink);
@@ -1558,6 +1578,7 @@ public class MsgProcess {
                                                 CarlifeCarHardKeyCodeProto.CarlifeCarHardKeyCode keyCode = CarlifeCarHardKeyCodeProto.CarlifeCarHardKeyCode.parseFrom(msgdata);
                                                 int carKeyCode = keyCode.getKeycode();
                                                 log("[KEY] " + Utils.carKeyName(carKeyCode) + " (" + carKeyCode + ")");
+                                                if (mDirectCarPlayInputEnabled) { if (directInputReady()) CarPlayInputBridge.key(carKeyCode); log("[INPUT-BRIDGE] key=" + carKeyCode); break; }
                                                 switch (carKeyCode) {
                                                     case KEYCODE_OK: {
                                                         if (ForgroundService.mService != null) {
@@ -1592,7 +1613,8 @@ public class MsgProcess {
                                                                     + " x=" + action.getX()
                                                                     + " y=" + action.getY()
                                                     );
-                                                    genarateGesture(action.getAction(), action.getX(), action.getY());
+                                                    if (mDirectCarPlayInputEnabled) { if (directInputReady()) CarPlayInputBridge.touch(action.getAction(), action.getX(), action.getY()); }
+                                                    else genarateGesture(action.getAction(), action.getX(), action.getY());
                                                 } catch (Exception e) {
                                                     log("[USB] command/input parse error: " + e);
                                                 }
@@ -1619,7 +1641,8 @@ public class MsgProcess {
                                                     mPadAbsDx = 0;
                                                     mPadAbsDy = 0;
                                                     log("[PAD] DOWN ts=" + down.getTimestamp());
-                                                    if (ForgroundService.mService != null) {
+                                                    if (mDirectCarPlayInputEnabled) { if (directInputReady()) CarPlayInputBridge.down(); }
+                                                    else if (ForgroundService.mService != null) {
                                                         ForgroundService.mService.onCarPadDown();
                                                     }
                                                 } catch (Exception e) {
@@ -1638,7 +1661,8 @@ public class MsgProcess {
                                                     mPadSumDy += dy;
                                                     mPadAbsDx += Math.abs((long) dx);
                                                     mPadAbsDy += Math.abs((long) dy);
-                                                    if (ForgroundService.mService != null) {
+                                                    if (mDirectCarPlayInputEnabled) { if (directInputReady()) CarPlayInputBridge.move(move.getDeltaX(), move.getDeltaY()); }
+                                                    else if (ForgroundService.mService != null) {
                                                         ForgroundService.mService.onCarPadMove(dx, dy);
                                                     }
                                                     log(
@@ -1656,7 +1680,8 @@ public class MsgProcess {
                                                     CarLifeTouchPadActionProto.CarlifeTouchPadUp up =
                                                             CarLifeTouchPadActionProto.CarlifeTouchPadUp.parseFrom(msgdata);
                                                     log("[PAD] UP ts=" + up.getTimestamp());
-                                                    if (ForgroundService.mService != null) {
+                                                    if (mDirectCarPlayInputEnabled) { if (directInputReady()) CarPlayInputBridge.up(); }
+                                                    else if (ForgroundService.mService != null) {
                                                         ForgroundService.mService.onCarPadUp();
                                                     }
                                                     long duration = mPadStartTimestamp == 0
@@ -1733,7 +1758,7 @@ public class MsgProcess {
                     switch (msg.what) {
                         case Utils.MSG_WRITE_VIDEO_HEARTBEAT: {
                             synchronized (MsgProcess.this) {
-                                if (!mHuVideoStarted || mMediaCodecTool.getMediaProjection() == null
+                                if (!videoSessionReady()
                                         || !mVideoHeartbeat.due(SystemClock.elapsedRealtime())) return;
                             }
                             output.write(VideoHeartbeat.packet(System.currentTimeMillis()));
@@ -1803,7 +1828,14 @@ public class MsgProcess {
 
                             mMainHandler.post(() -> {
                                 if (!usbOk || mReleased || generation != mUsbGeneration) return;
-                                mMediaCodecTool.startProjection(mContext,
+                                if (headlessMode()) {
+                                    log("[BRIDGE] headless ready: no screen capture; native CarPlay input");
+                                    if (mDirectCarPlayAudioEnabled) postAudio(AudioHandler.AUDIO_START);
+                                    return;
+                                }
+                                Activity activity = mUiActivity.get();
+                                if (activity == null) { log("[VIDEO] open CarProjection to authorize screen capture"); return; }
+                                mMediaCodecTool.startProjection(activity,
                                         (data, keyFrame) -> enqueueVideo(data, keyFrame, generation, false),
                                         REQUEST_CODE, mVISWidth, mVISHeight, mVideoBit, mVideoFrame);
                             });
