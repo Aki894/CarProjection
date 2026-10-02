@@ -64,7 +64,7 @@ final class CarPlayVideoBridge {
                         AppLogger.append("[BRIDGE] video SPS/PPS accepted=" + actual[0] + "x" + actual[1]);
                     } else {
                         if (!configured) throw new IOException("Video frame before config");
-                        H264BridgeFrames.nalus(data); // Reject malformed units before the USB writer.
+                        H264BridgeFrames.types(data); // Reject malformed units before the USB writer.
                         target.frame(token, data);
                     }
                 }

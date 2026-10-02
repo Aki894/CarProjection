@@ -1372,9 +1372,10 @@ public class MsgProcess {
                                                     CarlifeVideoEncoderInfoProto.CarlifeVideoEncoderInfo encoderInfo = CarlifeVideoEncoderInfoProto.CarlifeVideoEncoderInfo.parseFrom(msgdata);
                                                     log("encoderInfo = " + encoderInfo.getWidth() + ", " + encoderInfo.getHeight() + ", " + encoderInfo.getFrameRate());
                                                     if (encoderInfo.getWidth() > 10 && encoderInfo.getHeight() > 10) {
-                                                        mHuVideoInitialized = true;
+                                                        CarPlayVideoBridge.invalidate();
                                                         mVISWidth = encoderInfo.getWidth();
                                                         mVISHeight = encoderInfo.getHeight();
+                                                        mHuVideoInitialized = true;
                                                         refreshSize();
                                                         log("get cheji MirrorWidth = " + mVISWidth + ", MirrorHeight" + mVISHeight);
                                                     }
