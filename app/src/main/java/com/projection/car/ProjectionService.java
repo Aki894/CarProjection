@@ -12,6 +12,8 @@ import android.content.pm.ServiceInfo;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.IBinder;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
 
 import androidx.annotation.Nullable;
@@ -26,15 +28,32 @@ public class ProjectionService extends Service {
     private static final String ACTION_STOP = "com.projection.car.action.STOP_PROJECTION";
     private static final String EXTRA_RESULT_CODE = "result_code";
     private static final String EXTRA_RESULT_DATA = "result_data";
+    private static final String EXTRA_PROJECTION_TOKEN = "projection_token";
+    private long projectionToken;
 
     private MediaProjection mediaProjection;
     private PowerManager.WakeLock wakeLock;
+    private final Handler wakeHandler = new Handler(Looper.getMainLooper());
+    private static final long WAKE_TIMEOUT_MS = 30 * 60 * 1000L;
+    private static final long WAKE_RENEW_MS = 10 * 60 * 1000L;
+    private final Runnable renewWakeLock = new Runnable() {
+        @Override public void run() {
+            if (wakeLock == null) return;
+            if (!getSharedPreferences("set", MODE_PRIVATE).getBoolean("keep_screen_awake", true)) {
+                if (wakeLock.isHeld()) wakeLock.release();
+                return;
+            }
+            wakeLock.acquire(WAKE_TIMEOUT_MS);
+            wakeHandler.postDelayed(this, WAKE_RENEW_MS);
+        }
+    };
 
-    public static void start(Context context, int resultCode, Intent resultData) {
+    public static void start(Context context, int resultCode, Intent resultData, long token) {
         Intent intent = new Intent(context, ProjectionService.class);
         intent.setAction(ACTION_START);
         intent.putExtra(EXTRA_RESULT_CODE, resultCode);
         intent.putExtra(EXTRA_RESULT_DATA, resultData);
+        intent.putExtra(EXTRA_PROJECTION_TOKEN, token);
         ContextCompat.startForegroundService(context, intent);
     }
 
@@ -52,7 +71,7 @@ public class ProjectionService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
-            stopProjectionAndSelf();
+            stopProjectionAndSelf(startId);
             return START_NOT_STICKY;
         }
 
@@ -64,6 +83,7 @@ public class ProjectionService extends Service {
         acquireScreenWakeLockIfEnabled();
 
         if (intent != null && ACTION_START.equals(intent.getAction())) {
+            projectionToken = intent.getLongExtra(EXTRA_PROJECTION_TOKEN, -1);
             int resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0);
             Intent resultData = intent.getParcelableExtra(EXTRA_RESULT_DATA);
             if (resultCode != 0 && resultData != null) {
@@ -71,14 +91,18 @@ public class ProjectionService extends Service {
                         (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
                 try {
                     mediaProjection = manager.getMediaProjection(resultCode, resultData);
-                    ProjectionBridge.deliver(mediaProjection);
+                    if (!ProjectionBridge.deliver(projectionToken, mediaProjection)) {
+                        Utils.log("[VIDEO] stale/unclaimed projection service stopped");
+                        stopProjectionAndSelf(startId);
+                        return START_NOT_STICKY;
+                    }
                     BrightnessController.setProjectionActive(this, true);
                 } catch (RuntimeException e) {
                     Utils.log("failed to create MediaProjection: " + e);
-                    stopProjectionAndSelf();
+                    stopProjectionAndSelf(startId);
                 }
             } else {
-                stopProjectionAndSelf();
+                stopProjectionAndSelf(startId);
             }
         }
 
@@ -139,10 +163,13 @@ public class ProjectionService extends Service {
                 PowerManager.SCREEN_DIM_WAKE_LOCK,
                 "CarProjection:ProjectionScreen"
         );
-        wakeLock.acquire();
+        wakeLock.setReferenceCounted(false);
+        wakeLock.acquire(WAKE_TIMEOUT_MS);
+        wakeHandler.removeCallbacks(renewWakeLock);
+        wakeHandler.postDelayed(renewWakeLock, WAKE_RENEW_MS);
     }
 
-    private void stopProjectionAndSelf() {
+    private void stopProjectionAndSelf(int startId) {
         if (mediaProjection != null) {
             try {
                 mediaProjection.stop();
@@ -151,13 +178,14 @@ public class ProjectionService extends Service {
             mediaProjection = null;
         }
         stopForeground(STOP_FOREGROUND_REMOVE);
-        stopSelf();
+        stopSelf(startId);
     }
 
     @Override
     public void onDestroy() {
+        wakeHandler.removeCallbacksAndMessages(null);
         BrightnessController.setProjectionActive(this, false);
-        ProjectionBridge.clearListener();
+        ProjectionBridge.clearListener(projectionToken);
 
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();

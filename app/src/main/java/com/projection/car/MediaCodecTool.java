@@ -104,16 +104,16 @@ public class MediaCodecTool {
         projectionReadyListener = readyListener;
         startingProjection = true;
 
-        ProjectionBridge.setListener(projection -> {
+        long bridgeToken = ProjectionBridge.setListener(projection -> {
             ProjectionBridge.clearListener();
             if (epoch != sessionEpoch) {
                 if (projection != null) projection.stop();
-                return;
+                return false;
             }
             startingProjection = false;
             mediaProjection = projection;
             if (mediaProjection == null) {
-                return;
+                return false;
             }
 
             mediaProjection.registerCallback(
@@ -122,16 +122,17 @@ public class MediaCodecTool {
             );
             if (!createVirtualDisplay()) {
                 if (projectionReadyListener != null) projectionReadyListener.onProjectionStopped();
-                return;
+                return false;
             }
 
             if (projectionReadyListener != null) {
                 projectionReadyListener.onProjectionReady();
             }
+            return true;
         });
 
         try {
-            ProjectionService.start(activity, resultCode, resultData);
+            ProjectionService.start(activity, resultCode, resultData, bridgeToken);
             return true;
         } catch (RuntimeException e) {
             startingProjection = false;

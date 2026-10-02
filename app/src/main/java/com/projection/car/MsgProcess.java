@@ -1,5 +1,6 @@
 package com.projection.car;
 
+import android.Manifest;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.app.Activity;
@@ -7,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Path;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
@@ -685,6 +687,10 @@ public class MsgProcess {
         private void startCapture() {
             if (mAudioStart || !usbOk || !isUsbAudioEnabled()
                     || mMediaCodecTool.getMediaProjection() == null) {
+                return;
+            }
+            if (mContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                log("[AUDIO] capture skipped: RECORD_AUDIO permission missing");
                 return;
             }
             mAudioSourceGeneration = mUsbGeneration;

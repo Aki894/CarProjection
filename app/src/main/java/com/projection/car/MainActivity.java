@@ -704,11 +704,7 @@ public class MainActivity extends AppCompatActivity {
         filter.addAction(UsbManager.ACTION_USB_ACCESSORY_ATTACHED);
         filter.addAction(UsbManager.ACTION_USB_ACCESSORY_DETACHED);
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(usbReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(usbReceiver, filter);
-        }
+        ContextCompat.registerReceiver(this, usbReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
         receiverRegistered = true;
     }
 
