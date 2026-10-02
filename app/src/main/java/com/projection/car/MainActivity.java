@@ -203,6 +203,7 @@ public class MainActivity extends AppCompatActivity {
         binding.directCarPlayAudioSwitch.setOnCheckedChangeListener((button, checked) -> {
             preferences.edit().putBoolean("direct_carplay_audio", checked).apply();
             if (msgProcess != null) msgProcess.updateDirectCarPlayAudioEnabled(checked);
+            if (!checked) requestAudioPermissionIfNeeded();
             updateAudioModeControls();
         });
         binding.carLifeMediaAudioSwitch.setChecked(
@@ -726,6 +727,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void requestAudioPermissionIfNeeded() {
+        if (preferences.getBoolean("direct_carplay_audio", false)) return;
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                 == PackageManager.PERMISSION_GRANTED) {
             return;
@@ -762,6 +764,8 @@ public class MainActivity extends AppCompatActivity {
     private void openOrRequestPermission(UsbAccessory accessory) {
         if (!isCarLifeAccessory(accessory) || msgProcess == null) return;
         if (CarLifeSessionService.isOpen(accessory)) {
+            binding.statusTitle.setText(R.string.status_connected);
+            binding.statusDetail.setText("已恢复后台 CarLife 会话。");
             log("[USB] duplicate attach/open ignored");
             return;
         }

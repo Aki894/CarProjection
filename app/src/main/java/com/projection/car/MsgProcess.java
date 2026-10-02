@@ -117,7 +117,7 @@ public class MsgProcess {
     private InputStream mInputStream;
     private FileOutputStream mOutputStream;
     private Context mContext;
-    private java.lang.ref.WeakReference<Activity> mUiActivity = new java.lang.ref.WeakReference<>(null);
+    private volatile java.lang.ref.WeakReference<Activity> mUiActivity = new java.lang.ref.WeakReference<>(null);
 
 
     private Handler mUsbReadHandler;
