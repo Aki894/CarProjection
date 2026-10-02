@@ -36,6 +36,18 @@ final class RemoteCursorController {
     private final ForgroundService service;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final WindowManager windowManager;
+    private final SharedPreferences preferences;
+    private final CursorMotion cursorMotion = new CursorMotion();
+    private boolean cursorFramePending;
+    private final Runnable renderCursor = new Runnable() {
+        @Override public void run() {
+            cursorFramePending = false;
+            if (cursorView == null) return;
+            boolean moving = cursorMotion.advance(SystemClock.uptimeMillis());
+            cursorView.position(cursorMotion.x(), cursorMotion.y());
+            if (moving) scheduleCursorFrame();
+        }
+    };
 
     private CursorView cursorView;
     private WindowManager.LayoutParams params;
@@ -63,6 +75,7 @@ final class RemoteCursorController {
 
     RemoteCursorController(ForgroundService service) {
         this.service = service;
+        this.preferences = service.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         this.windowManager = (WindowManager) service.getSystemService(
                 Context.WINDOW_SERVICE
         );
@@ -77,6 +90,8 @@ final class RemoteCursorController {
             @Override
             public void run() {
                 ensureCursor();
+                refreshBounds();
+                flushCursorPosition();
 
                 if (liveDragActive) {
                     Utils.log("[CONTROL] PAD DOWN ignored while drag is finishing");
@@ -117,7 +132,6 @@ final class RemoteCursorController {
             @Override
             public void run() {
                 ensureCursor();
-                refreshBounds();
 
                 float gain = calculateGain(dx, dy);
                 boolean lockCursor = dragArmed && isCursorLockedDuringDrag();
@@ -180,6 +194,7 @@ final class RemoteCursorController {
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
+                flushCursorPosition();
                 TouchPadTapTracker.Release release = tapTracker.up(SystemClock.uptimeMillis());
                 if (release == TouchPadTapTracker.Release.DRAG_END && liveDragActive) {
                     dragFingerDown = false;
@@ -233,6 +248,7 @@ final class RemoteCursorController {
 
     private boolean dispatchClick(String source) {
         ensureCursor();
+        flushCursorPosition();
         Path path = new Path();
         path.moveTo(cursorX, cursorY);
         GestureDescription.StrokeDescription stroke =
@@ -395,15 +411,11 @@ final class RemoteCursorController {
     }
 
     private float calculateGain(int dx, int dy) {
-        SharedPreferences prefs = service.getSharedPreferences(
-                PREFS,
-                Context.MODE_PRIVATE
-        );
-        float sensitivity = prefs.getFloat(
+        float sensitivity = preferences.getFloat(
                 KEY_SENSITIVITY,
                 DEFAULT_SENSITIVITY
         );
-        float acceleration = prefs.getFloat(
+        float acceleration = preferences.getFloat(
                 KEY_ACCELERATION,
                 DEFAULT_ACCELERATION
         );
@@ -415,17 +427,11 @@ final class RemoteCursorController {
     }
 
     private boolean isEnabled() {
-        return service.getSharedPreferences(
-                PREFS,
-                Context.MODE_PRIVATE
-        ).getBoolean(KEY_ENABLED, true);
+        return preferences.getBoolean(KEY_ENABLED, true);
     }
 
     private boolean isCursorLockedDuringDrag() {
-        return service.getSharedPreferences(
-                PREFS,
-                Context.MODE_PRIVATE
-        ).getBoolean(KEY_LOCK_CURSOR_DURING_DRAG, false);
+        return preferences.getBoolean(KEY_LOCK_CURSOR_DURING_DRAG, false);
     }
 
     @SuppressWarnings("deprecation")
@@ -463,18 +469,20 @@ final class RemoteCursorController {
         cursorView = new CursorView(service);
 
         params = new WindowManager.LayoutParams(
-                cursorSize,
-                cursorSize,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                         | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT
         );
         params.gravity = Gravity.TOP | Gravity.START;
-
-        updateCursorPosition();
+        params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        cursorMotion.snap(cursorX, cursorY);
+        cursorView.position(cursorX, cursorY);
         try {
             windowManager.addView(cursorView, params);
             Utils.log(
@@ -491,24 +499,36 @@ final class RemoteCursorController {
     }
 
     private void updateCursorPosition() {
-        if (params == null) {
-            return;
+        if (cursorView == null) return;
+        if (dragArmed || !preferences.getBoolean("pointer_smoothing", true)) {
+            cursorMotion.snap(cursorX, cursorY);
+        } else {
+            cursorMotion.target(cursorX, cursorY, SystemClock.uptimeMillis());
         }
+        scheduleCursorFrame();
+    }
 
-        params.x = Math.round(cursorX - cursorSize / 2f);
-        params.y = Math.round(cursorY - cursorSize / 2f);
+    private void scheduleCursorFrame() {
+        if (cursorFramePending || cursorView == null) return;
+        cursorFramePending = true;
+        cursorView.postOnAnimation(renderCursor);
+    }
 
-        if (cursorView != null && cursorView.isAttachedToWindow()) {
-            try {
-                windowManager.updateViewLayout(cursorView, params);
-            } catch (RuntimeException e) {
-                Utils.log("[CONTROL] cursor move failed: " + e);
-            }
+    // A click or drag boundary must use the complete input displacement,
+    // including MOVE packets received since the last visual frame.
+    private void flushCursorPosition() {
+        cursorMotion.snap(cursorX, cursorY);
+        if (cursorView != null) {
+            cursorView.removeCallbacks(renderCursor);
+            cursorFramePending = false;
+            cursorView.position(cursorX, cursorY);
         }
     }
 
     private void removeCursor() {
         if (cursorView != null) {
+            cursorView.removeCallbacks(renderCursor);
+            cursorView.dispose();
             try {
                 windowManager.removeView(cursorView);
             } catch (RuntimeException ignored) {
@@ -516,6 +536,8 @@ final class RemoteCursorController {
         }
         cursorView = null;
         params = null;
+        cursorFramePending = false;
+        cursorMotion.snap(0, 0);
         cursorX = 0;
         cursorY = 0;
 
@@ -537,13 +559,35 @@ final class RemoteCursorController {
         return Math.max(min, Math.min(max, value));
     }
 
-    private static final class CursorView extends View {
+    private final class CursorView extends View {
 
         private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Handler handler = new Handler(Looper.getMainLooper());
 
         private float scale = 1f;
+        private float x, y;
+        private final int[] screenLocation = new int[2];
+        private final Runnable resetFlash = () -> {
+            scale = 1f;
+            invalidate();
+        };
+
+        void position(float x, float y) {
+            this.x = x;
+            this.y = y;
+            invalidate();
+        }
+
+        void dispose() {
+            handler.removeCallbacksAndMessages(null);
+        }
+
+        @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+            super.onSizeChanged(w, h, oldw, oldh);
+            refreshBounds();
+            flushCursorPosition();
+        }
 
         CursorView(Context context) {
             super(context);
@@ -560,9 +604,11 @@ final class RemoteCursorController {
         @Override
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
-            float cx = getWidth() / 2f;
-            float cy = getHeight() / 2f;
-            float radius = Math.min(getWidth(), getHeight()) * 0.28f * scale;
+            // Convert global injection coordinates to this fixed overlay's local space.
+            getLocationOnScreen(screenLocation);
+            float cx = x - screenLocation[0];
+            float cy = y - screenLocation[1];
+            float radius = cursorSize * 0.28f * scale;
 
             canvas.drawCircle(cx, cy, radius, fillPaint);
             canvas.drawCircle(cx, cy, radius, strokePaint);
@@ -571,13 +617,8 @@ final class RemoteCursorController {
         void flash() {
             scale = 1.35f;
             invalidate();
-            handler.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    scale = 1f;
-                    invalidate();
-                }
-            }, 100);
+            handler.removeCallbacks(resetFlash);
+            handler.postDelayed(resetFlash, 100);
         }
     }
 }

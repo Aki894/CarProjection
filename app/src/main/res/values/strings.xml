@@ -85,4 +85,6 @@
     <string-array name="tts_sample_rates">
         <item>16 kHz</item><item>24 kHz</item><item>32 kHz</item><item>44.1 kHz</item><item>48 kHz（默认）</item>
     </string-array>
+    <string name="pointer_smoothing">光标平滑</string>
+    <string name="pointer_smoothing_summary">默认开启，减轻触控板移动的跳格感。关闭可比较直接响应；点击及拖拽使用准确目标位置，指针速度和加速度仍可单独调整。</string>
 </resources>

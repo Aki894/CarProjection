@@ -435,6 +435,18 @@
                         android:textAppearance="?attr/textAppearanceBodySmall" />
 
                     <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/pointerSmoothingSwitch"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:text="@string/pointer_smoothing" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/pointer_smoothing_summary"
+                        android:textAppearance="?attr/textAppearanceBodySmall" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/lockCursorDuringDragSwitch"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"

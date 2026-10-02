@@ -40,6 +40,7 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.projection.car.Utils.REQUEST_CODE;
 import static com.projection.car.Utils.log;
@@ -62,6 +63,7 @@ public class MainActivity extends AppCompatActivity {
 
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private boolean logRenderScheduled;
+    private final AtomicBoolean logNotificationQueued = new AtomicBoolean();
 
     private final Runnable logRenderRunnable = new Runnable() {
         @Override
@@ -74,7 +76,12 @@ public class MainActivity extends AppCompatActivity {
     private final AppLogger.Listener logListener = new AppLogger.Listener() {
         @Override
         public void onLogUpdated() {
-            uiHandler.post(() -> scheduleLogRender());
+            if (logNotificationQueued.compareAndSet(false, true)) {
+                uiHandler.post(() -> {
+                    logNotificationQueued.set(false);
+                    scheduleLogRender();
+                });
+            }
         }
     };
 
@@ -221,6 +228,10 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
         );
+
+        binding.pointerSmoothingSwitch.setChecked(preferences.getBoolean("pointer_smoothing", true));
+        binding.pointerSmoothingSwitch.setOnCheckedChangeListener((buttonView, checked) ->
+                preferences.edit().putBoolean("pointer_smoothing", checked).apply());
 
         float pointerSensitivity = preferences.getFloat(
                 "pointer_sensitivity",
@@ -848,6 +859,9 @@ public class MainActivity extends AppCompatActivity {
                 .append(" USB media=").append(binding.carLifeMediaAudioSwitch.isChecked()).append('\n')
                 .append("TTS sample rate=").append(binding.ttsSampleRateSpinner.getSelectedItem())
                 .append(" channels=mono").append('\n')
+                .append("Pointer smoothing=").append(binding.pointerSmoothingSwitch.isChecked())
+                .append(" sensitivity=").append(binding.pointerSensitivitySlider.getValue())
+                .append(" acceleration=").append(binding.pointerAccelerationSlider.getValue()).append('\n')
                 .append("Car audio PCM volume=").append(Math.round(binding.carAudioVolumeSlider.getValue()))
                 .append("%\n")
                 .append("RECORD_AUDIO granted=").append(ContextCompat.checkSelfPermission(this,

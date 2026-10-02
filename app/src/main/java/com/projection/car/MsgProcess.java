@@ -1039,22 +1039,26 @@ public class MsgProcess {
 
                                 if (len == 8) {
                                     int msg_type = data[3];
-                                    log("msg_type = " + msg_type + ", read data = " + Arrays.toString(data));
                                     int msgLen = bytesToInt2(data, 4);
-                                    log("msgLen = " + msgLen);
                                     CarLifeFrameReader.checkPayloadLength(msgLen);
                                     byte[] msgdata = new byte[msgLen];
                                     CarLifeFrameReader.readFully(input, msgdata);
                                     if (generation != mUsbGeneration || !usbOk) break;
                                     len = msgdata.length;
-                                    log("read data = " + Arrays.toString(msgdata));
-                                    log("read msg data = " + len + " msgLen " + msgLen);
                                     int carmsgLen = bytesToShort2(msgdata, 0) & 0xffff;
                                     if (carmsgLen > msgdata.length - 8) {
                                         throw new IOException("invalid CarLife command payload length " + carmsgLen);
                                     }
                                     int type = bytesToInt2(msgdata, 4);
-                                    log("read carmsgLen data = " + carmsgLen + " type " + type);
+                                    // A parsed MOVE log below retains every delta/timestamp;
+                                    // avoid five redundant dumps and UI notifications per MOVE.
+                                    if (type != MSG_TOUCH_PAD_MOVE) {
+                                        log("msg_type = " + msg_type + ", read data = " + Arrays.toString(data));
+                                        log("msgLen = " + msgLen);
+                                        log("read data = " + Arrays.toString(msgdata));
+                                        log("read msg data = " + len + " msgLen " + msgLen);
+                                        log("read carmsgLen data = " + carmsgLen + " type " + type);
+                                    }
                                     byte[] carmsg = new byte[carmsgLen];
                                     System.arraycopy(msgdata, 8, carmsg, 0, carmsgLen);
                                     msgdata = carmsg;
@@ -1362,14 +1366,14 @@ public class MsgProcess {
                                                     mPadSumDy += dy;
                                                     mPadAbsDx += Math.abs((long) dx);
                                                     mPadAbsDy += Math.abs((long) dy);
+                                                    if (ForgroundService.mService != null) {
+                                                        ForgroundService.mService.onCarPadMove(dx, dy);
+                                                    }
                                                     log(
                                                             "[PAD] MOVE dx=" + dx
                                                                     + " dy=" + dy
                                                                     + " ts=" + move.getTimestamp()
                                                     );
-                                                    if (ForgroundService.mService != null) {
-                                                        ForgroundService.mService.onCarPadMove(dx, dy);
-                                                    }
                                                 } catch (Exception e) {
                                                     log("[PAD] MOVE parse error: " + e);
                                                 }
