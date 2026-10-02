@@ -74,4 +74,7 @@
     <string name="export_log">导出诊断日志</string>
     <string name="log_export_saved">诊断日志已保存</string>
     <string name="log_export_failed">无法保存诊断日志，请重新选择保存位置</string>
+    <string name="car_audio_volume">车机输出音量</string>
+    <string name="car_audio_volume_value">%1$d%%</string>
+    <string name="car_audio_volume_summary">实时调整发送给车机的 USB 音频，默认 30%。0% 为车机静音，100% 为此前原始输出。也影响测试音；手机扬声器音量仍由手机控制。</string>
 </resources>

@@ -148,6 +148,15 @@ public class MainActivity extends AppCompatActivity {
         binding.ttsAudioCompatibilitySwitch.setChecked(
                 preferences.getBoolean("tts_audio_compatibility", false)
         );
+        int carVolume = Math.max(0, Math.min(100, preferences.getInt("car_audio_volume", 30)));
+        binding.carAudioVolumeSlider.setValue(carVolume);
+        binding.carAudioVolumeValue.setText(getString(R.string.car_audio_volume_value, carVolume));
+        binding.carAudioVolumeSlider.addOnChangeListener((slider, value, fromUser) -> {
+            int percent = Math.round(value);
+            binding.carAudioVolumeValue.setText(getString(R.string.car_audio_volume_value, percent));
+            preferences.edit().putInt("car_audio_volume", percent).apply();
+            if (msgProcess != null) msgProcess.updateCarAudioVolume(percent);
+        });
         updateAudioModeControls();
         binding.ttsAudioCompatibilitySwitch.setOnCheckedChangeListener(
                 (buttonView, checked) -> {
@@ -809,6 +818,8 @@ public class MainActivity extends AppCompatActivity {
                 .append(" / ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n')
                 .append("TTS compatibility=").append(binding.ttsAudioCompatibilitySwitch.isChecked())
                 .append(" USB media=").append(binding.carLifeMediaAudioSwitch.isChecked()).append('\n')
+                .append("Car audio PCM volume=").append(Math.round(binding.carAudioVolumeSlider.getValue()))
+                .append("%\n")
                 .append("RECORD_AUDIO granted=").append(ContextCompat.checkSelfPermission(this,
                         Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED).append('\n')
                 .append(binding.audioHuStatusValue.getText()).append('\n')
@@ -869,7 +880,7 @@ public class MainActivity extends AppCompatActivity {
                     .getPackageInfo(getPackageName(), 0)
                     .versionName;
         } catch (PackageManager.NameNotFoundException e) {
-            return "0.3.4";
+            return "0.3.5";
         }
     }
 

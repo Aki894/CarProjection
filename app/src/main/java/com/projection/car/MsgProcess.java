@@ -155,6 +155,8 @@ public class MsgProcess {
     private int mVideoFrame = 0;
     private volatile boolean mCarLifeMediaAudioEnabled = true;
     private volatile boolean mTtsAudioCompatibilityEnabled;
+    private volatile int mCarAudioVolumePercent;
+    private final PcmVolume mPcmVolume;
     private volatile boolean mAudioTestToneActive;
     private volatile boolean mCancelAudioTest;
     private Integer mHuAudioTransmissionMode;
@@ -174,6 +176,9 @@ public class MsgProcess {
         mTtsAudioCompatibilityEnabled = context.getSharedPreferences("set", MODE_PRIVATE)
                 .getBoolean("tts_audio_compatibility", false);
 
+        mCarAudioVolumePercent = Math.max(0, Math.min(100,
+                context.getSharedPreferences("set", MODE_PRIVATE).getInt("car_audio_volume", 30)));
+        mPcmVolume = new PcmVolume(mCarAudioVolumePercent / 100.0);
         refreshSize();
 
         mMediaCodecTool = new MediaCodecTool();
@@ -214,6 +219,7 @@ public class MsgProcess {
         if (mReleased) return;
         final int generation = ++mUsbGeneration;
         log("startProjection");
+        log("[AUDIO] car output volume=" + mCarAudioVolumePercent + "% (PCM gain)");
         mHuAudioTransmissionMode = null;
         mHuMediaSampleRate = null;
         mHuContentEncryption = null;
@@ -296,6 +302,11 @@ public class MsgProcess {
         mCarLifeMediaAudioEnabled = enabled;
         log("[AUDIO] USB media setting=" + enabled + " (reconnect to renegotiate)");
         mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_RECONFIGURE);
+    }
+
+    public void updateCarAudioVolume(int percent) {
+        mCarAudioVolumePercent = Math.max(0, Math.min(100, percent));
+        log("[AUDIO] car output volume=" + mCarAudioVolumePercent + "% (PCM gain)");
     }
 
     public void updateTtsAudioCompatibilityEnabled(boolean enabled) {
@@ -740,7 +751,7 @@ public class MsgProcess {
                         + mQueuedBytes / 1024 + "KB queuedPackets=" + mQueuedPackets
                         + " sent=" + mWriteStats.bytes.get() / 1024 + "KB packets="
                         + mWriteStats.packets.get()
-                        + " dropped=" + mDroppedPackets);
+                        + " dropped=" + mDroppedPackets + " volume=" + mCarAudioVolumePercent + "%");
                 if (!mAudioSignalSeen) {
                     log(audioTag() + "PCM still silent; check RECORD_AUDIO permission, "
                             + "source app capture policy/usage (navigation guidance may be excluded)");
@@ -953,6 +964,11 @@ public class MsgProcess {
         if (!usbOk || mOutputStream == null) return false;
         boolean isData = serviceType == MSG_MEDIA_DATA || serviceType == MSG_NAVI_TTS_DATA;
         if (isData && mPendingAudioPackets.get() >= 8) return false;
+        // Apply only to PCM DATA, never protobuf INIT or END messages.
+        if (isData) {
+            data = mPcmVolume.apply(data, length, channel == TTS ? 1 : 2,
+                    mCarAudioVolumePercent / 100.0);
+        }
         byte[] carLifeMsg = exportVideoMsg(serviceType, data, length);
         byte[] headmsg = new byte[8];
         headmsg[3] = channel;
