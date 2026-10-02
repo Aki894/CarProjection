@@ -155,6 +155,9 @@ public class MsgProcess {
     private int mVideoFrame = 0;
     private volatile boolean mCarLifeMediaAudioEnabled = true;
     private volatile boolean mTtsAudioCompatibilityEnabled;
+    private volatile int mTtsSampleRate = 16000;
+    private volatile int mTtsChannels = 1;
+    private int mTtsWireChannels = 1;
     private volatile int mCarAudioVolumePercent;
     private final PcmVolume mPcmVolume;
     private volatile boolean mAudioTestToneActive;
@@ -176,6 +179,12 @@ public class MsgProcess {
         mTtsAudioCompatibilityEnabled = context.getSharedPreferences("set", MODE_PRIVATE)
                 .getBoolean("tts_audio_compatibility", false);
 
+        SharedPreferences audioPrefs = context.getSharedPreferences("set", MODE_PRIVATE);
+        mTtsSampleRate = audioPrefs.getInt("tts_sample_rate", 16000);
+        mTtsChannels = audioPrefs.getInt("tts_channels", 1) == 2 ? 2 : 1;
+        boolean validRate = false;
+        for (int rate : TtsPcmConverter.RATES) validRate |= mTtsSampleRate == rate;
+        if (!validRate) mTtsSampleRate = 16000;
         mCarAudioVolumePercent = Math.max(0, Math.min(100,
                 context.getSharedPreferences("set", MODE_PRIVATE).getInt("car_audio_volume", 30)));
         mPcmVolume = new PcmVolume(mCarAudioVolumePercent / 100.0);
@@ -304,6 +313,15 @@ public class MsgProcess {
         mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_RECONFIGURE);
     }
 
+    public void updateTtsAudioFormat(int sampleRate, int channels) {
+        if (mTtsSampleRate == sampleRate && mTtsChannels == channels) return;
+        mCancelAudioTest = true;
+        mTtsSampleRate = sampleRate;
+        mTtsChannels = channels;
+        log("[TTS-AUDIO] selected rate=" + sampleRate + " channels=" + channels);
+        mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_RECONFIGURE);
+    }
+
     public void updateCarAudioVolume(int percent) {
         mCarAudioVolumePercent = Math.max(0, Math.min(100, percent));
         log("[AUDIO] car output volume=" + mCarAudioVolumePercent + "% (PCM gain)");
@@ -357,8 +375,13 @@ public class MsgProcess {
         return startAudioTest(AudioHandler.AUDIO_TEST_TTS_16K);
     }
 
+    public boolean playConfiguredTtsTestTone() {
+        return startAudioTest(AudioHandler.AUDIO_TEST_TTS_SELECTED);
+    }
+
     private synchronized boolean startAudioTest(int what) {
-        if (mTtsAudioCompatibilityEnabled && what != AudioHandler.AUDIO_TEST_TTS_16K) {
+        if (mTtsAudioCompatibilityEnabled && what != AudioHandler.AUDIO_TEST_TTS_16K
+                && what != AudioHandler.AUDIO_TEST_TTS_SELECTED) {
             log("[AUDIO-TEST] MEDIA test disabled in TTS compatibility mode");
             return false;
         }
@@ -552,14 +575,17 @@ public class MsgProcess {
         public static final int AUDIO_TEST_TTS_16K = 6;
 
         public static final int AUDIO_RECONFIGURE = 7;
+        public static final int AUDIO_TEST_TTS_SELECTED = 8;
 
         private AudioRecord mAudioRecord;
         private boolean mAudioStart;
         private boolean mCaptureTtsMode;
+        private int mCaptureRate;
+        private int mCaptureChannels;
+        private TtsPcmConverter mTtsConverter;
         private boolean mTtsSessionOpen;
-        private final Pcm48StereoTo16Mono mResampler = new Pcm48StereoTo16Mono();
         private final byte[] mCaptureBuffer = new byte[3840]; // 20 ms at 48k stereo
-        private final byte[] mTtsPacket = new byte[640]; // 20 ms at 16k mono
+        private byte[] mTtsPacket = new byte[640]; // 20 ms in the selected TTS format
         private int mTtsPacketBytes;
         private long mCapturedBytes;
         private long mQueuedBytes;
@@ -594,6 +620,7 @@ public class MsgProcess {
                     removeMessages(AUDIO_TEST_MEDIA_48K);
                     removeMessages(AUDIO_TEST_MEDIA_44K);
                     removeMessages(AUDIO_TEST_TTS_16K);
+                    removeMessages(AUDIO_TEST_TTS_SELECTED);
                     mAudioTestToneActive = false;
                     stopCapture();
                     break;
@@ -612,7 +639,10 @@ public class MsgProcess {
                     else mAudioTestToneActive = false;
                     break;
                 case AUDIO_TEST_TTS_16K:
-                    runTtsTestTone();
+                    runTtsTestTone(16000, 1);
+                    break;
+                case AUDIO_TEST_TTS_SELECTED:
+                    runTtsTestTone(mTtsSampleRate, mTtsChannels);
                     break;
             }
         }
@@ -623,6 +653,8 @@ public class MsgProcess {
                 return;
             }
             mCaptureTtsMode = mTtsAudioCompatibilityEnabled;
+            mCaptureRate = mTtsSampleRate;
+            mCaptureChannels = mTtsChannels;
             try {
                 AudioPlaybackCaptureConfiguration config =
                         new AudioPlaybackCaptureConfiguration.Builder(mMediaCodecTool.getMediaProjection())
@@ -652,7 +684,6 @@ public class MsgProcess {
                     throw new IllegalStateException("AudioRecord did not start");
                 }
                 mAudioStart = true;
-                mResampler.reset();
                 mTtsPacketBytes = 0;
                 mCapturedBytes = mQueuedBytes = mQueuedPackets = mDroppedPackets = 0;
                 mWriteStats = new AudioWriteStats();
@@ -663,10 +694,12 @@ public class MsgProcess {
                 mLastStatsTime = SystemClock.elapsedRealtime();
                 log(audioTag() + "capture started: 48000Hz stereo PCM16");
                 if (mCaptureTtsMode) {
-                    log(audioTag() + "resample 48000/2ch -> 16000/1ch (low-pass FIR)");
-                    sendTtsInitPacket();
+                    mTtsConverter = new TtsPcmConverter(mCaptureRate, mCaptureChannels);
+                    mTtsPacket = new byte[mCaptureRate / 50 * mCaptureChannels * 2];
+                    log(audioTag() + "convert 48000/2ch -> " + mCaptureRate + "/"
+                            + mCaptureChannels + "ch PCM16");
+                    sendTtsInitPacket(mCaptureRate, mCaptureChannels);
                     mTtsSessionOpen = true;
-                    log(audioTag() + "NAVI_TTS_INIT channel=4 16000Hz mono PCM16");
                 } else {
                     sendMediaInitPacket();
                 }
@@ -694,7 +727,7 @@ public class MsgProcess {
                     mCapturedBytes += length;
                     recordPcmStats(mCaptureBuffer, length);
                     if (mCaptureTtsMode) {
-                        byte[] mono = mResampler.convert(mCaptureBuffer, length);
+                        byte[] mono = mTtsConverter.convert(mCaptureBuffer, length);
                         int offset = 0;
                         while (offset < mono.length) {
                             int count = Math.min(mTtsPacket.length - mTtsPacketBytes,
@@ -795,7 +828,7 @@ public class MsgProcess {
                 enqueueMediaPacket(Utils.MSG_MEDIA_STOP, new byte[0], 0);
             }
             mTtsPacketBytes = 0;
-            mResampler.reset();
+            mTtsConverter = null;
             if (wasStarted) log(audioTag() + "capture stopped");
         }
 
@@ -858,7 +891,7 @@ public class MsgProcess {
             }
         }
 
-        private void runTtsTestTone() {
+        private void runTtsTestTone(int sampleRate, int channels) {
             if (!usbOk || mOutputStream == null || mCancelAudioTest || mReleased) {
                 mAudioTestToneActive = false;
                 return;
@@ -869,19 +902,19 @@ public class MsgProcess {
             stopCapture();
 
             try {
-                final int sampleRate = 16000;
                 final int frequency = 1000;
-                final int framesPerPacket = 320; // 20 ms mono
+                final int framesPerPacket = sampleRate / 50; // 20 ms
                 final int packetCount = 100;
                 final int amplitude = 6500;
 
-                sendTtsInitPacket();
+                sendTtsInitPacket(sampleRate, channels);
 
                 long sampleIndex = 0;
-                log("[AUDIO-TEST] TTS START 1kHz 16kHz mono PCM16 duration=2s");
+                log("[AUDIO-TEST] TTS START 1kHz " + sampleRate + "Hz channels="
+                        + channels + " PCM16 duration=2s");
 
                 for (int packet = 0; packet < packetCount && usbOk && !mReleased && !mCancelAudioTest; packet++) {
-                    byte[] pcm = new byte[framesPerPacket * 2];
+                    byte[] pcm = new byte[framesPerPacket * channels * 2];
                     int offset = 0;
 
                     for (int frame = 0; frame < framesPerPacket; frame++) {
@@ -892,8 +925,10 @@ public class MsgProcess {
                         );
                         sampleIndex++;
 
-                        pcm[offset++] = (byte) (value & 0xFF);
-                        pcm[offset++] = (byte) ((value >> 8) & 0xFF);
+                        for (int channel = 0; channel < channels; channel++) {
+                            pcm[offset++] = (byte) (value & 0xFF);
+                            pcm[offset++] = (byte) ((value >> 8) & 0xFF);
+                        }
                     }
 
                     enqueueAudioPacket(
@@ -918,13 +953,15 @@ public class MsgProcess {
         }
     }
 
-    private void sendTtsInitPacket() {
+    private synchronized void sendTtsInitPacket(int sampleRate, int channels) {
+        mTtsWireChannels = channels;
         CarlifeTTSInitProto.CarlifeTTSInit init = CarlifeTTSInitProto.CarlifeTTSInit.newBuilder()
-                .setSampleRate(16000)
-                .setChannelConfig(1)
+                .setSampleRate(sampleRate)
+                .setChannelConfig(channels)
                 .setSampleFormat(16)
                 .build();
         enqueueAudioPacket(TTS, MSG_NAVI_TTS_INIT, init.toByteArray(), init.getSerializedSize());
+        log("[TTS-AUDIO] NAVI_TTS_INIT channel=4 rate=" + sampleRate + " channels=" + channels);
     }
 
     private void sendMediaInitPacket() {
@@ -966,7 +1003,7 @@ public class MsgProcess {
         if (isData && mPendingAudioPackets.get() >= 8) return false;
         // Apply only to PCM DATA, never protobuf INIT or END messages.
         if (isData) {
-            data = mPcmVolume.apply(data, length, channel == TTS ? 1 : 2,
+            data = mPcmVolume.apply(data, length, channel == TTS ? mTtsWireChannels : 2,
                     mCarAudioVolumePercent / 100.0);
         }
         byte[] carLifeMsg = exportVideoMsg(serviceType, data, length);
