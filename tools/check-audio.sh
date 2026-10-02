@@ -8,6 +8,9 @@ java -m jdk.compiler/com.sun.tools.javac.Main -d "$audio_test_dir" \
   "$project_dir/tools/AudioResamplerCheck.java" \
   "$project_dir/app/src/main/java/com/projection/car/CarLifeFrameReader.java" \
   "$project_dir/app/src/main/java/com/projection/car/AppLogger.java" \
-  "$project_dir/tools/DiagnosticsCheck.java"
+  "$project_dir/tools/DiagnosticsCheck.java" \
+  "$project_dir/app/src/main/java/com/projection/car/TouchPadTapTracker.java" \
+  "$project_dir/tools/TouchPadTapCheck.java"
 java -cp "$audio_test_dir" com.projection.car.AudioResamplerCheck
 java -cp "$audio_test_dir" com.projection.car.DiagnosticsCheck
+java -cp "$audio_test_dir" com.projection.car.TouchPadTapCheck

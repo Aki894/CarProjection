@@ -28,9 +28,6 @@ final class RemoteCursorController {
     private static final float DEFAULT_SENSITIVITY = 1.8f;
     private static final float DEFAULT_ACCELERATION = 0.6f;
 
-    private static final long DOUBLE_TAP_WINDOW_MS = 450L;
-    private static final long TAP_MAX_DURATION_MS = 500L;
-
     // Short gesture segments keep the drag responsive while avoiding
     // dispatching a new gesture before Android finishes the previous one.
     private static final long DRAG_SEGMENT_MIN_MS = 16L;
@@ -49,10 +46,7 @@ final class RemoteCursorController {
     private int screenHeight;
     private int cursorSize;
 
-    private long padDownTime;
-    private long lastTapUpTime;
-    private boolean padMoved;
-    private boolean sawOkDuringContact;
+    private final TouchPadTapTracker tapTracker = new TouchPadTapTracker();
     private boolean dragArmed;
 
     private boolean liveDragActive;
@@ -84,13 +78,11 @@ final class RemoteCursorController {
             public void run() {
                 ensureCursor();
 
-                long now = SystemClock.uptimeMillis();
-                padDownTime = now;
-                padMoved = false;
-                sawOkDuringContact = false;
-
-                dragArmed = lastTapUpTime > 0
-                        && now - lastTapUpTime <= DOUBLE_TAP_WINDOW_MS;
+                if (liveDragActive) {
+                    Utils.log("[CONTROL] PAD DOWN ignored while drag is finishing");
+                    return;
+                }
+                dragArmed = tapTracker.down(SystemClock.uptimeMillis());
 
                 if (dragArmed) {
                     dragOriginX = cursorX;
@@ -160,9 +152,9 @@ final class RemoteCursorController {
                     }
                 }
 
-                padMoved = true;
+                boolean moved = tapTracker.move(dx, dy);
 
-                if (dragArmed) {
+                if (dragArmed && moved) {
                     if (!liveDragActive) {
                         liveDragActive = true;
                         dragInjectedX = dragOriginX;
@@ -188,36 +180,27 @@ final class RemoteCursorController {
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
-                long now = SystemClock.uptimeMillis();
-                long duration = padDownTime > 0 ? now - padDownTime : 0;
-
-                if (dragArmed && liveDragActive && padMoved) {
+                TouchPadTapTracker.Release release = tapTracker.up(SystemClock.uptimeMillis());
+                if (release == TouchPadTapTracker.Release.DRAG_END && liveDragActive) {
                     dragFingerDown = false;
                     if (!isCursorLockedDuringDrag()) {
                         dragPendingX = cursorX;
                         dragPendingY = cursorY;
                     }
-                    lastTapUpTime = 0;
-
-                    // If a segment is still running, its callback will send
-                    // the final continuation and release the synthetic finger.
-                    if (!dragDispatchInFlight) {
-                        dispatchNextDragSegment();
+                    // The in-flight segment callback emits the final finger-up.
+                    if (!dragDispatchInFlight) dispatchNextDragSegment();
+                } else if (release == TouchPadTapTracker.Release.DOUBLE_TAP && !liveDragActive) {
+                    cancelLiveDragState(false);
+                    if (dispatchClick("DOUBLE_TAP")) {
+                        tapTracker.doubleClickDispatched(SystemClock.uptimeMillis());
                     }
-                } else if (!padMoved
-                        && !sawOkDuringContact
-                        && duration <= TAP_MAX_DURATION_MS) {
-                    lastTapUpTime = now;
-                    Utils.log("[CONTROL] TAP registered for live drag");
-                } else {
-                    lastTapUpTime = 0;
+                } else if (release == TouchPadTapTracker.Release.FIRST_TAP) {
+                    cancelLiveDragState(false);
+                    Utils.log("[CONTROL] TAP registered for double tap / live drag");
+                } else if (!liveDragActive) {
                     cancelLiveDragState(false);
                 }
-
                 dragArmed = false;
-                padDownTime = 0;
-                padMoved = false;
-                sawOkDuringContact = false;
             }
         });
     }
@@ -237,42 +220,30 @@ final class RemoteCursorController {
                     return;
                 }
 
-                sawOkDuringContact = true;
-                lastTapUpTime = 0;
-
-                Path path = new Path();
-                path.moveTo(cursorX, cursorY);
-
-                GestureDescription.StrokeDescription stroke =
-                        new GestureDescription.StrokeDescription(
-                                path,
-                                0,
-                                60
-                        );
-
-                BrightnessController.suppressAccessibilityActivityFor(500);
-                boolean accepted = service.dispatchGesture(
-                        new GestureDescription.Builder()
-                                .addStroke(stroke)
-                                .build(),
-                        null,
-                        null
-                );
-
-                if (cursorView != null) {
-                    cursorView.flash();
+                if (!tapTracker.mechanicalClick(SystemClock.uptimeMillis())) {
+                    Utils.log("[CONTROL] OK deduplicated after DOUBLE_TAP click");
+                    return;
                 }
-
-                Utils.log(
-                        "[CONTROL] CLICK x="
-                                + Math.round(cursorX)
-                                + " y="
-                                + Math.round(cursorY)
-                                + " accepted="
-                                + accepted
-                );
+                dragArmed = false;
+                cancelLiveDragState(false);
+                dispatchClick("OK");
             }
         });
+    }
+
+    private boolean dispatchClick(String source) {
+        ensureCursor();
+        Path path = new Path();
+        path.moveTo(cursorX, cursorY);
+        GestureDescription.StrokeDescription stroke =
+                new GestureDescription.StrokeDescription(path, 0, 60);
+        BrightnessController.suppressAccessibilityActivityFor(500);
+        boolean accepted = service.dispatchGesture(
+                new GestureDescription.Builder().addStroke(stroke).build(), null, null);
+        if (cursorView != null) cursorView.flash();
+        Utils.log("[CONTROL] CLICK source=" + source + " x=" + Math.round(cursorX)
+                + " y=" + Math.round(cursorY) + " accepted=" + accepted);
+        return accepted;
     }
 
     void hide() {
@@ -548,10 +519,7 @@ final class RemoteCursorController {
         cursorX = 0;
         cursorY = 0;
 
-        padDownTime = 0;
-        lastTapUpTime = 0;
-        padMoved = false;
-        sawOkDuringContact = false;
+        tapTracker.reset();
         dragArmed = false;
         cancelLiveDragState(false);
     }
