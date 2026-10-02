@@ -43,10 +43,14 @@ public final class DiagnosticsCheck {
 
         AppLogger.clear();
         AppLogger.append("[TTS-AUDIO] important INIT");
+        AppLogger.append("[USB] CLOSE reason=READ EOF");
+        AppLogger.append("[LIFECYCLE] DESTROY");
         for (int i = 0; i < 6000; i++) AppLogger.append("[PAD] MOVE " + i);
         List<String> exported = AppLogger.exportSnapshot();
-        require(exported.size() == 5001, "bounded general history plus older diagnostic");
+        require(exported.size() == 5003, "bounded general history plus older diagnostic");
         require(exported.get(0).contains("important INIT"), "diagnostic retained after input flood");
+        require(exported.stream().anyMatch(x -> x.contains("reason=READ EOF")), "USB error lost after input flood");
+        require(exported.stream().anyMatch(x -> x.contains("[LIFECYCLE] DESTROY")), "lifecycle lost after input flood");
         require(AppLogger.snapshot(false).size() == 300, "bounded display");
         require(AppLogger.snapshot(true).size() == 300, "input filter display bound");
         AppLogger.clear();

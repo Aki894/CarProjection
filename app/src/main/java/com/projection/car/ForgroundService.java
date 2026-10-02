@@ -2,6 +2,8 @@ package com.projection.car;
 
 import android.accessibilityservice.AccessibilityService;
 import android.view.accessibility.AccessibilityEvent;
+import android.os.Handler;
+import android.os.Looper;
 
 import static com.projection.car.Utils.log;
 
@@ -17,6 +19,7 @@ public class ForgroundService extends AccessibilityService {
     public static volatile ForgroundService mService;
 
     private RemoteCursorController remoteCursorController;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onServiceConnected() {
@@ -69,9 +72,12 @@ public class ForgroundService extends AccessibilityService {
     }
 
     public void onCarBack() {
-        BrightnessController.suppressAccessibilityActivityFor(500);
-        boolean accepted = performGlobalAction(GLOBAL_ACTION_BACK);
-        log("[CONTROL] BACK accepted=" + accepted);
+        mainHandler.post(() -> {
+            if (mService != this) return;
+            BrightnessController.suppressAccessibilityActivityFor(500);
+            boolean accepted = performGlobalAction(GLOBAL_ACTION_BACK);
+            log("[CONTROL] BACK accepted=" + accepted);
+        });
     }
 
     public void hideCarCursor() {
@@ -87,6 +93,7 @@ public class ForgroundService extends AccessibilityService {
 
     @Override
     public void onDestroy() {
+        mainHandler.removeCallbacksAndMessages(null);
         mService = null;
         if (remoteCursorController != null) {
             remoteCursorController.destroy();

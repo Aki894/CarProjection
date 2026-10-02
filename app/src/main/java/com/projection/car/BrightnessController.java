@@ -215,13 +215,13 @@ public final class BrightnessController {
             return;
         }
 
-        Settings.System.putInt(
-                context.getContentResolver(),
+        putSystemInt(
+                context,
                 Settings.System.SCREEN_BRIGHTNESS_MODE,
                 Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
         );
-        Settings.System.putInt(
-                context.getContentResolver(),
+        putSystemInt(
+                context,
                 Settings.System.SCREEN_BRIGHTNESS,
                 1
         );
@@ -238,18 +238,18 @@ public final class BrightnessController {
         // Restore the actual brightness while still in manual mode first.
         // Switching back to adaptive mode before writing the brightness value
         // can leave some OEM displays visually stuck at the dimmed level.
-        Settings.System.putInt(
-                context.getContentResolver(),
+        putSystemInt(
+                context,
                 Settings.System.SCREEN_BRIGHTNESS_MODE,
                 Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
         );
-        Settings.System.putInt(
-                context.getContentResolver(),
+        putSystemInt(
+                context,
                 Settings.System.SCREEN_BRIGHTNESS,
                 originalBrightness
         );
-        Settings.System.putInt(
-                context.getContentResolver(),
+        putSystemInt(
+                context,
                 Settings.System.SCREEN_BRIGHTNESS_MODE,
                 originalMode
         );
@@ -261,6 +261,14 @@ public final class BrightnessController {
                         + " value="
                         + originalBrightness
         );
+    }
+
+    private static void putSystemInt(Context context, String key, int value) {
+        try {
+            Settings.System.putInt(context.getContentResolver(), key, value);
+        } catch (RuntimeException e) {
+            Utils.log("[BRIGHTNESS] setting write failed (permission revoked / OEM): " + e);
+        }
     }
 
     private static int clampDelay(int seconds) {

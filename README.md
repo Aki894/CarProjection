@@ -2,6 +2,8 @@
 
 本项目基于carlife 协议投屏，安卓10以上无需root，可反向触控，仅用作研究学习
 
+[v0.3.9 断连诊断、稳定性修复与阶段一审查](docs/v0.3.9-stability-review.md)
+
 [v0.3.8 光标刷新与响应优化](docs/v0.3.8-cursor-smoothing.md)
 
 [v0.3.7 默认 48 kHz 单声道与备选采样率](docs/v0.3.7-mono-default.md)

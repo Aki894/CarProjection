@@ -10,6 +10,9 @@ import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Surface;
 
 import androidx.annotation.NonNull;
@@ -24,12 +27,16 @@ public class MediaCodecTool {
     private static final String SCREENCAP_NAME = "CarProjection";
 
     private Context appContext;
-    private MediaProjection mediaProjection;
+    private volatile MediaProjection mediaProjection;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private boolean permissionPending;
+    private boolean startingProjection;
+    private int sessionEpoch;
+    private int permissionEpoch;
     private VirtualDisplay virtualDisplay;
     private MediaCodec mediaCodec;
     private Surface inputSurface;
 
-    private boolean firstConfigFrame;
     private byte[] configBytes;
     private VideoDataEncodeListener encodeListener;
     private ProjectionReadyListener projectionReadyListener;
@@ -53,6 +60,12 @@ public class MediaCodecTool {
             int videoFps,
             int videoBitrate
     ) {
+        if (permissionPending || startingProjection || mediaProjection != null) {
+            log("[VIDEO] duplicate START ignored (permission pending / projecting)");
+            return;
+        }
+        permissionPending = true;
+        permissionEpoch = ++sessionEpoch;
         this.appContext = activity.getApplicationContext();
         this.encodeListener = encodeListener;
         this.width = (int) width;
@@ -65,57 +78,94 @@ public class MediaCodecTool {
                 (MediaProjectionManager) activity.getSystemService(
                         Context.MEDIA_PROJECTION_SERVICE
                 );
-        activity.startActivityForResult(
-                manager.createScreenCaptureIntent(),
-                requestCode
-        );
+        try {
+            activity.startActivityForResult(manager.createScreenCaptureIntent(), requestCode);
+        } catch (RuntimeException e) {
+            permissionPending = false;
+            log("[VIDEO] permission request failed: " + e);
+        }
     }
 
-    public void onActivityResult(
+    public boolean onActivityResult(
             Activity activity,
             int resultCode,
             Intent resultData,
             ProjectionReadyListener readyListener
     ) {
-        if (resultData == null) {
-            return;
+        boolean currentRequest = permissionPending && permissionEpoch == sessionEpoch;
+        permissionPending = false;
+        if (!currentRequest || resultCode != Activity.RESULT_OK || resultData == null) {
+            log("[VIDEO] permission result ignored/denied current=" + currentRequest);
+            return false;
         }
+        final int epoch = sessionEpoch;
 
         appContext = activity.getApplicationContext();
         projectionReadyListener = readyListener;
+        startingProjection = true;
 
         ProjectionBridge.setListener(projection -> {
             ProjectionBridge.clearListener();
+            if (epoch != sessionEpoch) {
+                if (projection != null) projection.stop();
+                return;
+            }
+            startingProjection = false;
             mediaProjection = projection;
             if (mediaProjection == null) {
                 return;
             }
 
             mediaProjection.registerCallback(
-                    new MediaProjectionStopCallback(),
-                    null
+                    new MediaProjectionStopCallback(projection),
+                    mainHandler
             );
-            createVirtualDisplay();
+            if (!createVirtualDisplay()) {
+                if (projectionReadyListener != null) projectionReadyListener.onProjectionStopped();
+                return;
+            }
 
             if (projectionReadyListener != null) {
                 projectionReadyListener.onProjectionReady();
             }
         });
 
-        ProjectionService.start(activity, resultCode, resultData);
+        try {
+            ProjectionService.start(activity, resultCode, resultData);
+            return true;
+        } catch (RuntimeException e) {
+            startingProjection = false;
+            log("[VIDEO] projection service start failed: " + e);
+            ProjectionBridge.clearListener();
+            return false;
+        }
+    }
+
+    public void requestKeyFrame() {
+        mainHandler.post(() -> {
+            if (mediaCodec == null) return;
+            try {
+                Bundle parameters = new Bundle();
+                parameters.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0);
+                mediaCodec.setParameters(parameters);
+            } catch (RuntimeException e) { log("[VIDEO] key-frame request failed: " + e); }
+        });
     }
 
     public void stopProjection() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post(this::stopProjection);
+            return;
+        }
+        sessionEpoch++;
+        startingProjection = false;
         ProjectionBridge.clearListener();
 
-        if (mediaProjection != null) {
-            try {
-                mediaProjection.stop();
-            } catch (RuntimeException ignored) {
-            }
-            mediaProjection = null;
-        } else {
-            releaseEncoderResources();
+        MediaProjection oldProjection = mediaProjection;
+        mediaProjection = null;
+        releaseEncoderResources();
+        if (oldProjection != null) {
+            try { oldProjection.stop(); } catch (RuntimeException ignored) {}
         }
 
         if (appContext != null) {
@@ -123,7 +173,7 @@ public class MediaCodecTool {
         }
     }
 
-    private void createVirtualDisplay() {
+    private boolean createVirtualDisplay() {
         log(
                 "start video encoder: "
                         + width + "x" + height
@@ -179,6 +229,7 @@ public class MediaCodecTool {
                         @NonNull MediaCodec.BufferInfo bufferInfo
                 ) {
                     try {
+                        if (codec != mediaCodec) return;
                         ByteBuffer outputBuffer = codec.getOutputBuffer(index);
                         if (outputBuffer == null || bufferInfo.size <= 0) {
                             return; // The finally block releases each buffer exactly once.
@@ -198,17 +249,14 @@ public class MediaCodecTool {
                                     outData,
                                     outData.length
                             );
-                            firstConfigFrame = true;
                             log(
                                     "H264 codec config received: "
                                             + configBytes.length + " bytes"
                             );
                         } else if ((bufferInfo.flags
                                 & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) {
-                            if (firstConfigFrame
-                                    && configBytes != null
+                            if (configBytes != null
                                     && configBytes.length > 0) {
-                                firstConfigFrame = false;
                                 byte[] combined = new byte[
                                         configBytes.length + outData.length
                                 ];
@@ -230,13 +278,13 @@ public class MediaCodecTool {
                             }
 
                             if (encodeListener != null) {
-                                encodeListener.onData(outData);
+                                encodeListener.onData(outData, true);
                             }
                         } else if (encodeListener != null) {
-                            encodeListener.onData(outData);
+                            encodeListener.onData(outData, false);
                         }
                     } catch (RuntimeException e) {
-                        log("encoder output error: " + e);
+                        log("[VIDEO] encoder output error: " + e);
                     } finally {
                         try {
                             codec.releaseOutputBuffer(index, false);
@@ -250,7 +298,10 @@ public class MediaCodecTool {
                         @NonNull MediaCodec codec,
                         @NonNull MediaCodec.CodecException e
                 ) {
-                    log("video encoder error: " + e.getMessage());
+                    if (codec != mediaCodec) return;
+                    log("[VIDEO] encoder error: " + e.getMessage());
+                    stopProjection();
+                    if (projectionReadyListener != null) projectionReadyListener.onProjectionStopped();
                 }
 
                 @Override
@@ -260,7 +311,7 @@ public class MediaCodecTool {
                 ) {
                     log("video output format: " + format);
                 }
-            });
+            }, mainHandler);
 
             mediaCodec.start();
 
@@ -274,9 +325,11 @@ public class MediaCodecTool {
                     null,
                     null
             );
+            return true;
         } catch (Exception e) {
-            log("createVirtualDisplay failed: " + e);
+            log("[VIDEO] createVirtualDisplay failed: " + e);
             stopProjection();
+            return false;
         }
     }
 
@@ -310,15 +363,21 @@ public class MediaCodecTool {
         }
 
         configBytes = null;
-        firstConfigFrame = false;
     }
 
     private final class MediaProjectionStopCallback
             extends MediaProjection.Callback {
 
+        private final MediaProjection expected;
+        MediaProjectionStopCallback(MediaProjection expected) { this.expected = expected; }
+
         @Override
         public void onStop() {
-            log("MediaProjection stopped");
+            if (mediaProjection != expected) {
+                log("[VIDEO] stale projection stop ignored");
+                return;
+            }
+            log("[VIDEO] MediaProjection stopped (system / notification)");
             mediaProjection = null;
             releaseEncoderResources();
             if (projectionReadyListener != null) {
@@ -336,7 +395,7 @@ public class MediaCodecTool {
     }
 
     public interface VideoDataEncodeListener {
-        void onData(byte[] data);
+        void onData(byte[] data, boolean keyFrame);
     }
 
     public interface ProjectionReadyListener {

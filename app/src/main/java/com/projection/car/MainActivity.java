@@ -24,8 +24,12 @@ import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 
 import androidx.annotation.Nullable;
+import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.android.material.snackbar.Snackbar;
@@ -60,6 +64,8 @@ public class MainActivity extends AppCompatActivity {
     private MsgProcess msgProcess;
     private SharedPreferences preferences;
     private boolean receiverRegistered;
+    private boolean permissionRequestPending;
+    private boolean activityResumed;
 
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private boolean logRenderScheduled;
@@ -95,10 +101,11 @@ public class MainActivity extends AppCompatActivity {
                 UsbAccessory accessory = getAccessory(intent);
                 if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
                         && accessory != null) {
-                    usbAccessory = accessory;
+                    permissionRequestPending = false;
                     openAccessory(accessory);
                 } else {
-                    log("USB accessory permission denied");
+                    permissionRequestPending = false;
+                    log("[USB] accessory permission denied");
                 }
                 return;
             }
@@ -106,7 +113,6 @@ public class MainActivity extends AppCompatActivity {
             if (UsbManager.ACTION_USB_ACCESSORY_ATTACHED.equals(action)) {
                 UsbAccessory accessory = getAccessory(intent);
                 if (accessory != null) {
-                    usbAccessory = accessory;
                     openOrRequestPermission(accessory);
                 }
                 return;
@@ -114,8 +120,12 @@ public class MainActivity extends AppCompatActivity {
 
             if (UsbManager.ACTION_USB_ACCESSORY_DETACHED.equals(action)) {
                 UsbAccessory accessory = getAccessory(intent);
-                log("USB accessory detached: " + accessory);
-                handleAccessoryDetached();
+                if (accessory == null || usbAccessory == null || accessory.equals(usbAccessory)) {
+                    log("[USB] accessory detached: " + accessory);
+                    handleAccessoryDetached();
+                } else {
+                    log("[USB] ignored detach of another accessory");
+                }
             }
         }
     };
@@ -123,9 +133,30 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        log("[LIFECYCLE] CREATE instance=" + System.identityHashCode(this)
+                + " task=" + getTaskId() + " action=" + getIntent().getAction());
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override public void handleOnBackPressed() {
+                if (msgProcess != null && msgProcess.isUsbConnected()) {
+                    log("[LIFECYCLE] BACK -> background; keep USB session");
+                    moveTaskToBack(true);
+                } else {
+                    log("[LIFECYCLE] BACK -> finish (USB inactive)");
+                    finish();
+                }
+            }
+        });
 
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
+        if (Build.VERSION.SDK_INT >= 35) {
+            ViewCompat.setOnApplyWindowInsetsListener(binding.getRoot(), (view, insets) -> {
+                Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                return insets;
+            });
+            ViewCompat.requestApplyInsets(binding.getRoot());
+        }
 
         AppLogger.setListener(logListener);
         binding.inputOnlySwitch.setOnCheckedChangeListener(
@@ -145,6 +176,13 @@ public class MainActivity extends AppCompatActivity {
         });
 
         preferences = getSharedPreferences("set", MODE_PRIVATE);
+        binding.lastDisconnectValue.setText(preferences.getString("last_disconnect_reason",
+                getString(R.string.no_disconnect_record)));
+        binding.toggleAudioDiagnosticsButton.setOnClickListener(v -> {
+            boolean show = binding.audioDiagnosticsPanel.getVisibility() != View.VISIBLE;
+            binding.audioDiagnosticsPanel.setVisibility(show ? View.VISIBLE : View.GONE);
+            binding.toggleAudioDiagnosticsButton.setText(show ? R.string.hide_audio_diagnostics : R.string.show_audio_diagnostics);
+        });
         binding.reverseControlSwitch.setChecked(
                 preferences.getBoolean("reverse_control_enabled", true)
         );
@@ -242,6 +280,12 @@ public class MainActivity extends AppCompatActivity {
                 0.6f
         );
 
+        pointerSensitivity = Float.isFinite(pointerSensitivity) ? Math.max(0.8f, Math.min(3f, pointerSensitivity)) : 1.8f;
+        pointerAcceleration = Float.isFinite(pointerAcceleration) ? Math.max(0f, Math.min(1.5f, pointerAcceleration)) : 0.6f;
+        pointerSensitivity = Math.round(pointerSensitivity * 10f) / 10f;
+        pointerAcceleration = Math.round(pointerAcceleration * 10f) / 10f;
+        preferences.edit().putFloat("pointer_sensitivity", pointerSensitivity)
+                .putFloat("pointer_acceleration", pointerAcceleration).apply();
         binding.pointerSensitivitySlider.setValue(pointerSensitivity);
         binding.pointerAccelerationSlider.setValue(pointerAcceleration);
         updatePointerLabels(pointerSensitivity, pointerAcceleration);
@@ -296,6 +340,8 @@ public class MainActivity extends AppCompatActivity {
                 preferences.getInt("frame", 3_000_000)
         );
 
+        videoFps = Math.max(5, Math.min(60, videoFps));
+        videoBitrate = Math.max(500_000, Math.min(20_000_000, videoBitrate));
         binding.fpsInput.setText(String.valueOf(videoFps));
         binding.bitrateInput.setText(String.valueOf(videoBitrate));
         binding.keepScreenAwakeSwitch.setChecked(
@@ -314,6 +360,20 @@ public class MainActivity extends AppCompatActivity {
                 videoFps,
                 videoBitrate,
                 new MsgProcess.InfoListener() {
+                    @Override public void onTransportClosed(String reason) {
+                        closeAccessory();
+                        binding.statusTitle.setText(R.string.status_disconnected);
+                        binding.statusDetail.setText(getString(R.string.disconnect_reason, reason));
+                        binding.lastDisconnectValue.setText(reason);
+                        resetConnectionDetails();
+                        updateAudioModeControls();
+                    }
+
+                    @Override public void onProjectionStopped() {
+                        binding.statusTitle.setText(R.string.status_projection_stopped);
+                        binding.statusDetail.setText(R.string.projection_restart_hint);
+                    }
+
                     @Override
                     public void onVISSize(int x, int y) {
                         binding.resolutionValue.setText(x + " × " + y);
@@ -518,18 +578,61 @@ public class MainActivity extends AppCompatActivity {
             BrightnessController.setAutoDimEnabled(this, true);
         });
 
+        binding.reconnectButton.setOnClickListener(v -> {
+            log("[USB] manual reconnect");
+            if (msgProcess != null) msgProcess.resetUsb("MANUAL_RECONNECT");
+            closeAccessory();
+            usbAccessory = null;
+            permissionRequestPending = false;
+            checkUsbAccessory();
+        });
+        binding.disconnectButton.setOnClickListener(v -> {
+            if (msgProcess != null) msgProcess.resetUsb("USER_DISCONNECT");
+            closeAccessory();
+        });
         registerUsbReceiver();
         requestAudioPermissionIfNeeded();
         checkUsbAccessory();
         refreshOptionalFeatureStatus();
     }
 
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        log("[LIFECYCLE] NEW_INTENT action=" + intent.getAction());
+        if (UsbManager.ACTION_USB_ACCESSORY_ATTACHED.equals(intent.getAction())) {
+            UsbAccessory accessory = getAccessory(intent);
+            if (accessory != null) openOrRequestPermission(accessory);
+        }
+    }
+
+    @Override protected void onPause() {
+        activityResumed = false;
+        uiHandler.removeCallbacks(logRenderRunnable);
+        logRenderScheduled = false;
+        log("[LIFECYCLE] PAUSE finishing=" + isFinishing());
+        super.onPause();
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
+        activityResumed = true;
+        log("[LIFECYCLE] RESUME instance=" + System.identityHashCode(this));
+        scheduleLogRender();
         if (binding != null) {
             refreshOptionalFeatureStatus();
             BrightnessController.onUserActivity(this);
+        }
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_AUDIO_PERMISSION && grantResults.length > 0) {
+            boolean granted = grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            log("[AUDIO] RECORD_AUDIO permission=" + granted);
+            if (granted && msgProcess != null) msgProcess.startReadAudio();
+            if (!granted) Snackbar.make(binding.getRoot(), R.string.audio_permission_denied, Snackbar.LENGTH_LONG).show();
         }
     }
 
@@ -557,19 +660,26 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        if (resultCode == RESULT_OK && data != null) {
+        if (msgProcess == null) return;
+        boolean projectionAccepted = msgProcess.mediaPermissionOk(this, resultCode, data);
+        if (!msgProcess.isUsbConnected()) {
+            log("[VIDEO] ignored projection permission result after USB closed");
+            return;
+        }
+        if (projectionAccepted) {
             binding.statusTitle.setText(R.string.status_projecting);
             binding.statusDetail.setText("屏幕录制已授权，正在建立视频流。");
-            msgProcess.mediaPermissionOk(this, resultCode, data);
         } else {
-            binding.statusTitle.setText(R.string.status_projection_denied);
-            binding.statusDetail.setText(R.string.auto_connect_hint);
+            binding.statusTitle.setText(resultCode == RESULT_OK ? R.string.status_projection_stopped : R.string.status_projection_denied);
+            binding.statusDetail.setText(resultCode == RESULT_OK ? R.string.permission_result_expired : R.string.auto_connect_hint);
             BrightnessController.setProjectionActive(this, false);
         }
     }
 
     @Override
     protected void onDestroy() {
+        log("[LIFECYCLE] DESTROY instance=" + System.identityHashCode(this)
+                + " finishing=" + isFinishing() + " changingConfig=" + isChangingConfigurations());
         AppLogger.clearListener(logListener);
         uiHandler.removeCallbacksAndMessages(null);
 
@@ -622,16 +732,34 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        usbAccessory = accessories[0];
-        openOrRequestPermission(usbAccessory);
+        for (UsbAccessory accessory : accessories) {
+            if (isCarLifeAccessory(accessory)) {
+                openOrRequestPermission(accessory);
+                return;
+            }
+        }
+        binding.statusDetail.setText(R.string.no_carlife_accessory);
+    }
+
+    private static boolean isCarLifeAccessory(UsbAccessory accessory) {
+        return accessory != null && "Baidu".equals(accessory.getManufacturer())
+                && "CarLife".equals(accessory.getModel());
     }
 
     private void openOrRequestPermission(UsbAccessory accessory) {
+        if (!isCarLifeAccessory(accessory) || msgProcess == null) return;
+        if (fileDescriptor != null && msgProcess.isUsbConnected() && accessory.equals(usbAccessory)) {
+            log("[USB] duplicate attach/open ignored");
+            return;
+        }
         if (usbManager.hasPermission(accessory)) {
             openAccessory(accessory);
             return;
         }
 
+        if (permissionRequestPending && accessory.equals(usbAccessory)) return;
+        usbAccessory = accessory;
+        permissionRequestPending = true;
         Intent permissionIntent = new Intent(ACTION_USB_PERMISSION)
                 .setPackage(getPackageName());
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
@@ -645,7 +773,13 @@ public class MainActivity extends AppCompatActivity {
                 permissionIntent,
                 flags
         );
-        usbManager.requestPermission(accessory, pendingIntent);
+        try {
+            usbManager.requestPermission(accessory, pendingIntent);
+        } catch (RuntimeException e) {
+            permissionRequestPending = false;
+            log("[USB] permission request failed: " + e);
+            binding.statusDetail.setText(getString(R.string.disconnect_reason, "PERMISSION: " + e));
+        }
     }
 
     private void openAccessory(UsbAccessory accessory) {
@@ -653,12 +787,20 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        msgProcess.resetUsb();
+        if (msgProcess == null || !isCarLifeAccessory(accessory)) return;
+        if (fileDescriptor != null && msgProcess.isUsbConnected() && accessory.equals(usbAccessory)) return;
+        msgProcess.resetUsb("ACCESSORY_REOPEN");
         closeAccessory();
-
-        fileDescriptor = usbManager.openAccessory(accessory);
+        usbAccessory = accessory;
+        try {
+            fileDescriptor = usbManager.openAccessory(accessory);
+        } catch (RuntimeException e) {
+            log("[USB] openAccessory error: " + e);
+            binding.lastDisconnectValue.setText("OPEN: " + e);
+            fileDescriptor = null;
+        }
         if (fileDescriptor == null) {
-            log("openAccessory failed");
+            log("[USB] openAccessory failed (no descriptor)");
             binding.statusTitle.setText(R.string.status_waiting);
             binding.statusDetail.setText("无法打开 CarLife USB 配件。");
             return;
@@ -673,13 +815,15 @@ public class MainActivity extends AppCompatActivity {
         binding.statusDetail.setText(
                 "CarLife 协议已连接，等待车机请求视频流。"
         );
-        log("USB accessory opened; CarLife transport ready");
+        log("[USB] accessory opened; CarLife transport ready");
+        updateAudioModeControls();
     }
 
     private void handleAccessoryDetached() {
         usbAccessory = null;
+        permissionRequestPending = false;
         if (msgProcess != null) {
-            msgProcess.resetUsb();
+            msgProcess.resetUsb("USB_ACCESSORY_DETACHED");
         }
         ProjectionService.stop(this);
         BrightnessController.setProjectionActive(this, false);
@@ -687,6 +831,11 @@ public class MainActivity extends AppCompatActivity {
 
         binding.statusTitle.setText(R.string.status_waiting);
         binding.statusDetail.setText(R.string.auto_connect_hint);
+        resetConnectionDetails();
+        updateAudioModeControls();
+    }
+
+    private void resetConnectionDetails() {
         binding.resolutionValue.setText(R.string.resolution_unknown);
         binding.headUnitIdValue.setText(R.string.head_unit_unknown);
         binding.audioHuStatusValue.setText(R.string.audio_hu_waiting);
@@ -767,7 +916,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void scheduleLogRender() {
-        if (binding == null
+        if (binding == null || !activityResumed
                 || binding.logCard.getVisibility() != View.VISIBLE) {
             return;
         }
@@ -779,7 +928,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void renderLog() {
-        if (binding == null
+        if (binding == null || !activityResumed
                 || binding.logCard.getVisibility() != View.VISIBLE) {
             return;
         }
@@ -867,6 +1016,7 @@ public class MainActivity extends AppCompatActivity {
                 .append("RECORD_AUDIO granted=").append(ContextCompat.checkSelfPermission(this,
                         Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED).append('\n')
                 .append(binding.audioHuStatusValue.getText()).append('\n')
+                .append("Last disconnect=").append(preferences.getString("last_disconnect_reason", "none")).append('\n')
                 .append("Log includes all categories, regardless of the input-only filter.\n\n");
         for (String line : AppLogger.exportSnapshot()) report.append(line).append('\n');
         pendingLogExport = report.toString();
@@ -887,8 +1037,13 @@ public class MainActivity extends AppCompatActivity {
         boolean tts = binding.ttsAudioCompatibilitySwitch.isChecked();
         binding.ttsSampleRateSpinner.setEnabled(tts);
         binding.carLifeMediaAudioSwitch.setEnabled(!tts);
-        binding.audioTestToneButton.setEnabled(!tts);
-        binding.audioTest44kButton.setEnabled(!tts);
+        boolean connected = msgProcess != null && msgProcess.isUsbConnected();
+        binding.audioTestToneButton.setEnabled(connected && !tts);
+        binding.audioTest44kButton.setEnabled(connected && !tts);
+        binding.audioTestTtsButton.setEnabled(connected);
+        binding.audioTestEnhancedTtsButton.setEnabled(connected);
+        binding.audioEncryptionProbeButton.setEnabled(connected);
+        binding.disconnectButton.setEnabled(connected);
     }
 
     private void runAudioTest(boolean started) {

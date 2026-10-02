@@ -58,6 +58,25 @@
                         android:layout_marginTop="8dp"
                         android:text="@string/auto_connect_hint"
                         android:textAppearance="?attr/textAppearanceBodyMedium" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/reconnectButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/reconnect" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/disconnectButton"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/disconnect" />
+                    <TextView
+                        android:id="@+id/lastDisconnectValue"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/no_disconnect_record"
+                        android:textIsSelectable="true"
+                        android:textAppearance="?attr/textAppearanceBodySmall" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -288,95 +307,109 @@
                         android:text="@string/car_audio_volume_summary"
                         android:textAppearance="?attr/textAppearanceBodySmall" />
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="18dp"
-                        android:text="@string/audio_hu_status"
-                        android:textAppearance="?attr/textAppearanceLabelLarge"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/audioHuStatusValue"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="@string/audio_hu_waiting"
-                        android:textAppearance="?attr/textAppearanceBodyMedium"
-                        android:textIsSelectable="true" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp"
-                        android:text="@string/audio_module_status"
-                        android:textAppearance="?attr/textAppearanceLabelLarge"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/audioModuleStatusValue"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="@string/audio_module_waiting"
-                        android:textAppearance="?attr/textAppearanceBodyMedium"
-                        android:textIsSelectable="true" />
-
-                    <TextView
-                        android:id="@+id/audioEncryptionProbeStatus"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp"
-                        android:text="@string/audio_encryption_probe_idle"
-                        android:textAppearance="?attr/textAppearanceBodyMedium" />
-
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/audioEncryptionProbeButton"
+                        android:id="@+id/toggleAudioDiagnosticsButton"
                         style="@style/Widget.Material3.Button.OutlinedButton"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/audio_encryption_probe" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/audioTestToneButton"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/show_audio_diagnostics" />
+                    <LinearLayout
+                        android:id="@+id/audioDiagnosticsPanel"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
-                        android:text="@string/audio_test_tone" />
+                        android:orientation="vertical"
+                        android:visibility="gone">
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="18dp"
+                            android:text="@string/audio_hu_status"
+                            android:textAppearance="?attr/textAppearanceLabelLarge"
+                            android:textStyle="bold" />
 
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/audioTest44kButton"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/audio_test_media_44k" />
+                        <TextView
+                            android:id="@+id/audioHuStatusValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:text="@string/audio_hu_waiting"
+                            android:textAppearance="?attr/textAppearanceBodyMedium"
+                            android:textIsSelectable="true" />
 
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/audioTestTtsButton"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/audio_test_tts" />
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="14dp"
+                            android:text="@string/audio_module_status"
+                            android:textAppearance="?attr/textAppearanceLabelLarge"
+                            android:textStyle="bold" />
 
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/audioTestEnhancedTtsButton"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/audio_test_enhanced_tts" />
+                        <TextView
+                            android:id="@+id/audioModuleStatusValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:text="@string/audio_module_waiting"
+                            android:textAppearance="?attr/textAppearanceBodyMedium"
+                            android:textIsSelectable="true" />
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="4dp"
-                        android:layout_marginTop="2dp"
-                        android:layout_marginEnd="4dp"
-                        android:text="@string/audio_test_tts_summary"
-                        android:textAppearance="?attr/textAppearanceBodySmall" />
+                        <TextView
+                            android:id="@+id/audioEncryptionProbeStatus"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="14dp"
+                            android:text="@string/audio_encryption_probe_idle"
+                            android:textAppearance="?attr/textAppearanceBodyMedium" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/audioEncryptionProbeButton"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/audio_encryption_probe" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/audioTestToneButton"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="16dp"
+                            android:text="@string/audio_test_tone" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/audioTest44kButton"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/audio_test_media_44k" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/audioTestTtsButton"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/audio_test_tts" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/audioTestEnhancedTtsButton"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/audio_test_enhanced_tts" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:layout_marginTop="2dp"
+                            android:layout_marginEnd="4dp"
+                            android:text="@string/audio_test_tts_summary"
+                            android:textAppearance="?attr/textAppearanceBodySmall" />
+                    </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

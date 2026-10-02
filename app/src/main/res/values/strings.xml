@@ -15,8 +15,8 @@
     <string name="keep_screen_awake_summary">避免手机自动锁屏导致车机画面中断</string>
     <string name="video_settings">视频设置</string>
     <string name="audio_settings">音频设置</string>
-    <string name="tts_audio_compatibility">TTS 兼容音频（16 kHz 单声道）</string>
-    <string name="tts_audio_compatibility_summary">MEDIA 无声的车机可开启：将允许捕获的应用音频通过导航/TTS 通道播放，音乐音质会降低。导航语音能否捕获取决于导航应用。切换后请拔插 USB 重连。</string>
+    <string name="tts_audio_compatibility">TTS 兼容音频（单声道）</string>
+    <string name="tts_audio_compatibility_summary">MEDIA 无声的车机可开启：将允许捕获的应用音频通过导航/TTS 通道播放，输出为单声道，采样率可在下方选择。导航语音能否捕获取决于导航应用。切换后请拔插 USB 重连。</string>
     <string name="carlife_media_audio">媒体音频通过 CarLife USB</string>
     <string name="carlife_media_audio_summary">常规模式：音乐/视频音频通过 CarLife MEDIA 通道发送到车机；关闭后请求蓝牙音频。TTS 兼容模式开启时优先使用 USB TTS 通道。</string>
     <string name="audio_hu_status">车机音频协商</string>
@@ -87,4 +87,14 @@
     </string-array>
     <string name="pointer_smoothing">光标平滑</string>
     <string name="pointer_smoothing_summary">默认开启，减轻触控板移动的跳格感。关闭可比较直接响应；点击及拖拽使用准确目标位置，指针速度和加速度仍可单独调整。</string>
+    <string name="reconnect">重新连接</string>
+    <string name="disconnect">断开连接</string>
+    <string name="status_disconnected">连接已断开</string>
+    <string name="disconnect_reason">断开原因：%1$s。可尝试重新连接；若失败，请重新插拔 USB。</string>
+    <string name="no_disconnect_record">尚无断连记录</string>
+    <string name="no_carlife_accessory">未检测到 CarLife USB 配件</string>
+    <string name="projection_restart_hint">USB 会话可能仍连接；点击“重新连接”可重新协商并申请投屏授权。</string>
+    <string name="show_audio_diagnostics">展开音频诊断 / 测试音</string>
+    <string name="hide_audio_diagnostics">收起音频诊断 / 测试音</string>
+    <string name="permission_result_expired">本次投屏授权已过期或未能启动，请重新连接后再次授权。</string>
 </resources>
