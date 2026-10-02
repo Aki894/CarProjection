@@ -24,9 +24,9 @@ final class CarPlayAudioBridge {
     }
     static synchronized ParcelFileDescriptor open(int uid, IBinder owner, String audioType) throws IOException {
         if (!ready() || owner == null || endpoints.size() >= 6) return null;
-        BridgePcmMixer.Stream stream = MIXER.add("media".equals(audioType));
-        if (stream == null) return null;
         ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+        BridgePcmMixer.Stream stream = MIXER.add("media".equals(audioType));
+        if (stream == null) { pipe[0].close(); pipe[1].close(); return null; }
         Endpoint endpoint = new Endpoint(uid, owner, pipe[0], stream);
         try {
             owner.linkToDeath(endpoint, 0);
@@ -67,7 +67,7 @@ final class CarPlayAudioBridge {
                 if (closed) return;
                 closed = true;
                 endpoints.remove(this);
-                owner.unlinkToDeath(this, 0);
+                try { owner.unlinkToDeath(this, 0); } catch (RuntimeException ignored) {}
                 stream.end(discard);
                 try { input.close(); } catch (IOException ignored) {}
                 AppLogger.append("[BRIDGE] stream closed droppedFrames=" + stream.droppedFrames);

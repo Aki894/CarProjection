@@ -13,11 +13,13 @@ final class BridgePcmMixer {
         final byte[] partial = new byte[4];
         int head, size, partialBytes;
         long droppedFrames;
-        boolean ended;
+        boolean ended, primed;
+        long lastAppendNanos;
         Stream(boolean media) { this.media = media; }
         synchronized void append(byte[] pcm, int length) {
             if (length < 0 || length > pcm.length) throw new IllegalArgumentException("PCM length");
             if (ended) return;
+            if (length > 0) lastAppendNanos = System.nanoTime();
             for (int i = 0; i < length; i++) {
                 partial[partialBytes++] = pcm[i];
                 if (partialBytes != 4) continue;
@@ -30,6 +32,10 @@ final class BridgePcmMixer {
             }
         }
         synchronized int drain(int[] output) {
+            boolean tail = ended || System.nanoTime() - lastAppendNanos >= 60_000_000L;
+            if (!primed && size < (media ? FRAMES * 2 : FRAMES) && !tail) return 0;
+            if (size < FRAMES && !tail) return 0;
+            primed = true;
             int count = Math.min(size, FRAMES);
             for (int i = 0; i < count; i++) {
                 output[i * 2] = samples[head * 2];
@@ -37,6 +43,7 @@ final class BridgePcmMixer {
                 head = (head + 1) % CAPACITY;
             }
             size -= count;
+            if (count < FRAMES && tail) primed = false;
             return count;
         }
         synchronized void end(boolean discard) {

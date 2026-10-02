@@ -14,10 +14,11 @@ public final class BridgeAudioCheck {
         BridgePcmMixer mixer = new BridgePcmMixer();
         BridgePcmMixer.Stream media = mixer.add(true);
         BridgePcmMixer.Stream voice = mixer.add(false);
-        byte[] music = tone(12000, 960);
+        byte[] music = tone(12000, 1920);
         for (int i = 0; i < music.length; i += 3) media.append(Arrays.copyOfRange(music, i, Math.min(i + 3, music.length)), Math.min(3, music.length - i));
         voice.append(tone(4000, 960), 3840);
         check(sample(mixer.mix(), 0) == 7000, "voice + ducked music");
+        check(sample(mixer.mix(), 0) == 12000, "voice ends independently");
         check(mixer.mix() == null, "empty does not hold HU focus");
         media.append(tone(-16000, 960), 3840);
         voice.append(tone(0, 960), 3840);
@@ -36,6 +37,17 @@ public final class BridgeAudioCheck {
         byte[] padded = mixer.mix();
         check(sample(padded, 6) == 1000 && sample(padded, 7) == 0, "short tail padded");
         check(mixer.mix() == null && mixer.add(true) != null, "EOF removes drained stream");
+        mixer.clear();
+        BridgePcmMixer.Stream aac = mixer.add(true);
+        aac.append(tone(1000, 1024), 4096);
+        check(mixer.mix() == null, "music prebuffer");
+        aac.append(tone(1000, 1024), 4096);
+        check(sample(mixer.mix(), 959) == 1000, "first AAC block");
+        check(sample(mixer.mix(), 959) == 1000, "second AAC block");
+        check(aac.size == 128 && mixer.mix() == null && aac.size == 128,
+                "1024-frame AAC tail must wait, not expand to a new 960-frame block");
+        aac.end(false);
+        check(sample(mixer.mix(), 127) == 1000, "flush ended AAC tail");
         System.out.println("PASS: bridge split PCM, voice ducking, silence, clipping, 120ms queue, stream bound, EOF tail and disconnect isolation");
     }
 }
