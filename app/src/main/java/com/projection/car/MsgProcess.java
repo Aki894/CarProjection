@@ -122,6 +122,14 @@ public class MsgProcess {
     private Handler mUsbReadHandler;
     private Handler mUsbWriteHandler;
     private volatile int mAudioSourceGeneration;
+    private volatile boolean mDirectCarPlayAudioEnabled;
+    private final CarPlayAudioBridge.Sink mBridgeSink = new CarPlayAudioBridge.Sink() {
+        @Override public boolean ready() {
+            return mDirectCarPlayAudioEnabled && usbOk && !mReleased && !mAudioTestToneActive
+                    && mMediaCodecTool != null && mMediaCodecTool.getMediaProjection() != null;
+        }
+        @Override public void start() { postAudio(AudioHandler.AUDIO_START); }
+    };
     private final AtomicInteger mPendingAudioPackets = new AtomicInteger();
     private final VideoQueueBudget mVideoBudget = new VideoQueueBudget();
     private long mSessionStartedAt;
@@ -183,6 +191,8 @@ public class MsgProcess {
         mInfoListener = infoListener;
         mVideoBit = bit;
         mVideoFrame = frame;
+        mDirectCarPlayAudioEnabled = context.getSharedPreferences("set", MODE_PRIVATE)
+                .getBoolean("direct_carplay_audio", false);
         mCarLifeMediaAudioEnabled = context.getSharedPreferences("set", MODE_PRIVATE)
                 .getBoolean("carlife_media_audio", true);
         mTtsAudioCompatibilityEnabled = context.getSharedPreferences("set", MODE_PRIVATE)
@@ -219,6 +229,7 @@ public class MsgProcess {
         mHuContentEncryption = null;
         notifyAudioFeatureStatus();
         usbOk = true;
+        CarPlayAudioBridge.attach(mBridgeSink);
         mInputStream = new AccessoryInputStream(in);
         mSessionStartedAt = SystemClock.elapsedRealtime();
         mLastReadAt = mLastWriteAt = mSessionStartedAt;
@@ -250,6 +261,7 @@ public class MsgProcess {
                     public void onProjectionStopped() {
                         if (permissionGeneration != mUsbGeneration || mReleased) return;
                         mCancelAudioTest = true;
+                        CarPlayAudioBridge.invalidate();
                         postAudio(AudioHandler.AUDIO_STOP);
                         mMainHandler.post(() -> {
                             if (!mReleased && usbOk && permissionGeneration == mUsbGeneration && mInfoListener != null) mInfoListener.onProjectionStopped();
@@ -281,6 +293,7 @@ public class MsgProcess {
                 + " videoPending=" + mVideoBudget.frames() + " videoBytes=" + mVideoBudget.bytes()
                 + " videoDropped=" + mVideoBudget.dropped() + " audioPending=" + mPendingAudioPackets.get());
         usbOk = false;
+        CarPlayAudioBridge.invalidate();
         final int audioStopGeneration = mUsbGeneration;
         final int closedGeneration = ++mUsbGeneration;
         mAudioReadHandler.obtainMessage(AudioHandler.AUDIO_STOP, audioStopGeneration, 0).sendToTarget();
@@ -309,6 +322,7 @@ public class MsgProcess {
 
     public void release() {
         mReleased = true;
+        CarPlayAudioBridge.detach(mBridgeSink);
         resetUsb("ACTIVITY_DESTROY");
         postAudio(AudioHandler.AUDIO_STOP);
         mMainHandler.removeCallbacksAndMessages(null);
@@ -329,7 +343,15 @@ public class MsgProcess {
     }
 
     private boolean isUsbAudioEnabled() {
-        return mCarLifeMediaAudioEnabled || mTtsAudioCompatibilityEnabled;
+        return mDirectCarPlayAudioEnabled || mCarLifeMediaAudioEnabled || mTtsAudioCompatibilityEnabled;
+    }
+
+    public void updateDirectCarPlayAudioEnabled(boolean enabled) {
+        mDirectCarPlayAudioEnabled = enabled;
+        mCancelAudioTest = true;
+        CarPlayAudioBridge.invalidate();
+        log("[BRIDGE] direct CarPlay audio=" + enabled);
+        postAudio(AudioHandler.AUDIO_RECONFIGURE);
     }
 
     public void updateCarLifeMediaAudioEnabled(boolean enabled) {
@@ -343,6 +365,7 @@ public class MsgProcess {
         if (mTtsSampleRate == sampleRate) return;
         mCancelAudioTest = true;
         mTtsSampleRate = sampleRate;
+        CarPlayAudioBridge.invalidate();
         log("[TTS-AUDIO] selected rate=" + sampleRate + " channels=1");
         postAudio(AudioHandler.AUDIO_RECONFIGURE);
     }
@@ -402,7 +425,7 @@ public class MsgProcess {
     }
 
     private synchronized boolean startAudioTest(int what) {
-        if (mTtsAudioCompatibilityEnabled && what != AudioHandler.AUDIO_TEST_TTS_16K
+        if ((mDirectCarPlayAudioEnabled || mTtsAudioCompatibilityEnabled) && what != AudioHandler.AUDIO_TEST_TTS_16K
                 && what != AudioHandler.AUDIO_TEST_TTS_SELECTED) {
             log("[AUDIO-TEST] MEDIA test disabled in TTS compatibility mode");
             return false;
@@ -417,6 +440,7 @@ public class MsgProcess {
         }
         mCancelAudioTest = false;
         mAudioTestToneActive = true;
+        CarPlayAudioBridge.invalidate();
         postAudio(what);
         return true;
     }
@@ -616,6 +640,12 @@ public class MsgProcess {
 
         public static final int AUDIO_RECONFIGURE = 7;
         public static final int AUDIO_TEST_TTS_SELECTED = 8;
+        public static final int AUDIO_BRIDGE_READ = 9;
+        private long mBridgeNextTick;
+        private long mBridgeLastData;
+        private long mBridgeEpoch;
+        private long mBridgePumpEpoch;
+        private boolean mReadingBridge;
 
         private AudioRecord mAudioRecord;
         private boolean mAudioStart;
@@ -648,10 +678,13 @@ public class MsgProcess {
 
         @Override
         public void handleMessage(@NonNull Message msg) {
-            if (msg.what != AUDIO_STOP && msg.what != AUDIO_READ && msg.arg1 != mUsbGeneration) return;
+            if (msg.what != AUDIO_STOP && msg.what != AUDIO_READ && msg.what != AUDIO_BRIDGE_READ && msg.arg1 != mUsbGeneration) return;
             switch (msg.what) {
                 case AUDIO_START:
                     startCapture();
+                    break;
+                case AUDIO_BRIDGE_READ:
+                    if (msg.arg1 == mUsbGeneration && (Long) msg.obj == mBridgePumpEpoch) readBridge();
                     break;
                 case AUDIO_READ:
                     readCapture();
@@ -663,7 +696,7 @@ public class MsgProcess {
                     break;
                 case AUDIO_RECONFIGURE:
                     stopCapture();
-                    if (usbOk && mMediaCodecTool.getMediaProjection() != null) {
+                    if (usbOk && (mDirectCarPlayAudioEnabled || mMediaCodecTool.getMediaProjection() != null)) {
                         startCapture();
                     }
                     break;
@@ -685,6 +718,26 @@ public class MsgProcess {
         }
 
         private void startCapture() {
+            if (mDirectCarPlayAudioEnabled) {
+                if (mAudioStart || !usbOk || mAudioTestToneActive || mReleased) return;
+                mAudioSourceGeneration = mUsbGeneration;
+                mAudioStart = mReadingBridge = true;
+                mCaptureTtsMode = true;
+                mCaptureRate = mTtsSampleRate;
+                mCaptureChannels = 1;
+                mTtsConverter = new TtsPcmConverter(mCaptureRate, 1);
+                mTtsPacket = new byte[mCaptureRate / 50 * 2];
+                mTtsPacketBytes = 0;
+                mCapturedBytes = mQueuedBytes = mQueuedPackets = mDroppedPackets = 0;
+                mWriteStats = new AudioWriteStats();
+                mStatsSamples = 0; mStatsSquares = 0; mStatsPeak = 0; mAudioSignalSeen = false;
+                mLastStatsTime = SystemClock.elapsedRealtime();
+                mBridgeNextTick = SystemClock.uptimeMillis();
+                mBridgePumpEpoch = ++mBridgeEpoch;
+                log("[BRIDGE] PCM pump started: 48000/2ch -> TTS " + mCaptureRate + "/mono");
+                scheduleBridge();
+                return;
+            }
             if (mAudioStart || !usbOk || !isUsbAudioEnabled()
                     || mMediaCodecTool.getMediaProjection() == null) {
                 return;
@@ -752,6 +805,54 @@ public class MsgProcess {
             }
         }
 
+        private void scheduleBridge() {
+            Message next = obtainMessage(AUDIO_BRIDGE_READ, mUsbGeneration, 0, Long.valueOf(mBridgePumpEpoch));
+            sendMessageAtTime(next, mBridgeNextTick);
+        }
+
+        private void readBridge() {
+            if (!mReadingBridge || !mAudioStart) return;
+            if (!usbOk || mReleased || !mDirectCarPlayAudioEnabled || mAudioSourceGeneration != mUsbGeneration) {
+                stopCapture(); return;
+            }
+            long now = SystemClock.uptimeMillis();
+            byte[] pcm = CarPlayAudioBridge.MIXER.mix();
+            if (pcm != null) {
+                if (!mTtsSessionOpen) {
+                    sendTtsInitPacket(mCaptureRate, 1);
+                    mTtsSessionOpen = true;
+                    mTtsConverter = new TtsPcmConverter(mCaptureRate, 1);
+                    log("[BRIDGE] TTS session started");
+                }
+                mBridgeLastData = now;
+                mCapturedBytes += pcm.length;
+                recordPcmStats(pcm, pcm.length);
+                feedTts(pcm, pcm.length);
+            } else if (mTtsSessionOpen && now - mBridgeLastData >= 500) {
+                enqueueAudioPacket(TTS, MSG_NAVI_TTS_END, new byte[0], 0);
+                mTtsSessionOpen = false;
+                mTtsPacketBytes = 0;
+                log("[BRIDGE] TTS idle END");
+            }
+            // Never burst stale audio after a scheduler stall.
+            mBridgeNextTick = Math.max(mBridgeNextTick + 20, now + 1);
+            scheduleBridge();
+        }
+
+        private void feedTts(byte[] pcm, int length) {
+            byte[] converted = mTtsConverter.convert(pcm, length);
+            int offset = 0;
+            while (offset < converted.length) {
+                int count = Math.min(mTtsPacket.length - mTtsPacketBytes, converted.length - offset);
+                System.arraycopy(converted, offset, mTtsPacket, mTtsPacketBytes, count);
+                offset += count; mTtsPacketBytes += count;
+                if (mTtsPacketBytes == mTtsPacket.length) {
+                    queueCaptureData(TTS, MSG_NAVI_TTS_DATA, mTtsPacket, mTtsPacketBytes);
+                    mTtsPacketBytes = 0;
+                }
+            }
+        }
+
         private void readCapture() {
             if (!mAudioStart) return;
             if (!usbOk || mAudioSourceGeneration != mUsbGeneration || !isUsbAudioEnabled()
@@ -773,19 +874,7 @@ public class MsgProcess {
                     mCapturedBytes += length;
                     recordPcmStats(mCaptureBuffer, length);
                     if (mCaptureTtsMode) {
-                        byte[] mono = mTtsConverter.convert(mCaptureBuffer, length);
-                        int offset = 0;
-                        while (offset < mono.length) {
-                            int count = Math.min(mTtsPacket.length - mTtsPacketBytes,
-                                    mono.length - offset);
-                            System.arraycopy(mono, offset, mTtsPacket, mTtsPacketBytes, count);
-                            offset += count;
-                            mTtsPacketBytes += count;
-                            if (mTtsPacketBytes == mTtsPacket.length) {
-                                queueCaptureData(TTS, MSG_NAVI_TTS_DATA, mTtsPacket, mTtsPacketBytes);
-                                mTtsPacketBytes = 0;
-                            }
-                        }
+                        feedTts(mCaptureBuffer, length);
                     } else {
                         queueCaptureData(MEDIA, MSG_MEDIA_DATA, mCaptureBuffer, length);
                     }
@@ -844,6 +933,9 @@ public class MsgProcess {
 
         private void stopCapture() {
             removeMessages(AUDIO_READ);
+            removeMessages(AUDIO_BRIDGE_READ);
+            mBridgePumpEpoch = ++mBridgeEpoch;
+            mReadingBridge = false;
             boolean wasStarted = mAudioStart;
             mAudioStart = false;
             if (mAudioRecord != null) {

@@ -89,7 +89,7 @@ public final class AppLogger {
     }
 
     private static boolean isDiagnostic(String message) {
-        return message.startsWith("[USB]") || message.startsWith("[LIFECYCLE]")
+        return message.startsWith("[BRIDGE]") || message.startsWith("[USB]") || message.startsWith("[LIFECYCLE]")
                 || message.startsWith("[VIDEO]") || message.startsWith("[CONTROL]")
                 || message.startsWith("[KEY]") || message.startsWith("[AUDIO") || message.startsWith("[TTS-AUDIO]")
                 || message.startsWith("[FEATURE]") || message.startsWith("[ENCRYPT]")

@@ -189,6 +189,12 @@ public class MainActivity extends AppCompatActivity {
         binding.lockCursorDuringDragSwitch.setChecked(
                 preferences.getBoolean("lock_cursor_during_drag", false)
         );
+        binding.directCarPlayAudioSwitch.setChecked(preferences.getBoolean("direct_carplay_audio", false));
+        binding.directCarPlayAudioSwitch.setOnCheckedChangeListener((button, checked) -> {
+            preferences.edit().putBoolean("direct_carplay_audio", checked).apply();
+            if (msgProcess != null) msgProcess.updateDirectCarPlayAudioEnabled(checked);
+            updateAudioModeControls();
+        });
         binding.carLifeMediaAudioSwitch.setChecked(
                 preferences.getBoolean("carlife_media_audio", true)
         );
@@ -1000,6 +1006,7 @@ public class MainActivity extends AppCompatActivity {
                 .append("Android ").append(Build.VERSION.RELEASE)
                 .append(" / SDK ").append(Build.VERSION.SDK_INT)
                 .append(" / ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n')
+                .append("Direct CarPlay audio=").append(binding.directCarPlayAudioSwitch.isChecked()).append('\n')
                 .append("TTS compatibility=").append(binding.ttsAudioCompatibilitySwitch.isChecked())
                 .append(" USB media=").append(binding.carLifeMediaAudioSwitch.isChecked()).append('\n')
                 .append("TTS sample rate=").append(binding.ttsSampleRateSpinner.getSelectedItem())
@@ -1030,7 +1037,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateAudioModeControls() {
-        boolean tts = binding.ttsAudioCompatibilitySwitch.isChecked();
+        boolean direct = binding.directCarPlayAudioSwitch.isChecked();
+        boolean tts = direct || binding.ttsAudioCompatibilitySwitch.isChecked();
+        binding.ttsAudioCompatibilitySwitch.setEnabled(!direct);
         binding.ttsSampleRateSpinner.setEnabled(tts);
         binding.carLifeMediaAudioSwitch.setEnabled(!tts);
         boolean connected = msgProcess != null && msgProcess.isUsbConnected();
