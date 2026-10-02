@@ -57,7 +57,9 @@ final class CarPlayAudioBridge {
             try (ParcelFileDescriptor.AutoCloseInputStream in = new ParcelFileDescriptor.AutoCloseInputStream(input)) {
                 byte[] data = new byte[8192];
                 int length;
-                while ((length = in.read(data)) >= 0) if (length > 0) stream.append(data, length);
+                while ((length = in.read(data)) >= 0) if (length > 0 && !stream.appendBlocking(data, length)) break;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             } catch (IOException ignored) {
                 // Peer exit, disable, USB disconnect and service destruction all close the pipe.
             } finally { close(false); }

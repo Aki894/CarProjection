@@ -204,6 +204,7 @@ public class MsgProcess {
         CarPlayVideoBridge.invalidate();
         log("[BRIDGE] direct CarPlay video=" + enabled + "; target=" + (int)mVISWidth + "x" + (int)mVISHeight);
     }
+    private final HuLiveness mHuLiveness = new HuLiveness();
     private final VideoQueueBudget mVideoBudget = new VideoQueueBudget();
     private long mSessionStartedAt;
     private volatile long mLastReadAt;
@@ -309,12 +310,24 @@ public class MsgProcess {
         CarPlayAudioBridge.attach(mBridgeSink);
         mInputStream = new AccessoryInputStream(in);
         mSessionStartedAt = SystemClock.elapsedRealtime();
+        mHuLiveness.reset(mSessionStartedAt);
+        watchHu(generation);
         mLastReadAt = mLastWriteAt = mSessionStartedAt;
         mLastReadType = mLastWriteType = 0;
         log("[USB] START generation=" + generation + " readBuffer=16384");
         mOutputStream = out;
         mUsbReadHandler.obtainMessage(0, generation, 0).sendToTarget();
 
+    }
+
+    private void watchHu(final int generation) {
+        mMainHandler.postDelayed(() -> {
+            if (!usbOk || mReleased || generation != mUsbGeneration) return;
+            long now = SystemClock.elapsedRealtime();
+            if (mHuLiveness.expired(now)) {
+                resetUsb("HU_SILENT_TIMEOUT idleMs=" + mHuLiveness.idle(now));
+            } else watchHu(generation);
+        }, 1000);
     }
 
     public boolean mediaPermissionOk(Activity activity, int resultCode, Intent resultData) {
@@ -1006,9 +1019,10 @@ public class MsgProcess {
                         + " sent=" + mWriteStats.bytes.get() / 1024 + "KB packets="
                         + mWriteStats.packets.get()
                         + " dropped=" + mDroppedPackets + " volume=" + mCarAudioVolumePercent + "%");
+                if (mReadingBridge) log("[BRIDGE] PCM flow " + CarPlayAudioBridge.MIXER.flowStats());
                 if (!mAudioSignalSeen) {
-                    log(audioTag() + "PCM still silent; check RECORD_AUDIO permission, "
-                            + "source app capture policy/usage (navigation guidance may be excluded)");
+                    log(audioTag() + (mReadingBridge ? "PCM still silent from DiPlay decoder/pipe"
+                            : "PCM still silent; check RECORD_AUDIO permission or source app capture policy"));
                 }
                 mLastStatsTime = now;
                 mStatsSamples = 0;
@@ -1282,6 +1296,7 @@ public class MsgProcess {
                                         if (generation != mUsbGeneration || !usbOk) break;
                                         mLastReadAt = SystemClock.elapsedRealtime();
                                         mLastReadType = type;
+                                        mHuLiveness.received(type, mLastReadAt);
                                     }
                                     // A parsed MOVE log below retains every delta/timestamp;
                                     // avoid five redundant dumps and UI notifications per MOVE.

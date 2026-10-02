@@ -104,7 +104,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Aki894/DiPlay
-          ref: 8a361334ec0f7622a93c82db4d1f40d64fc1801a
+          ref: 119e8095ee941cd65ae387db4a1f192a22122f7d
           path: diplay
       - name: Reject credential files in source
         run: python3 scripts/check_public_tree.py
