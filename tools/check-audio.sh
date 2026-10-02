@@ -28,7 +28,9 @@ java -m jdk.compiler/com.sun.tools.javac.Main -d "$audio_test_dir" \
   "$project_dir/app/src/main/java/com/projection/car/H264BridgeFrames.java" \
   "$project_dir/tools/VideoBridgeCheck.java" \
   "$project_dir/app/src/main/java/com/projection/car/HuLiveness.java" \
-  "$project_dir/tools/HuLivenessCheck.java"
+  "$project_dir/tools/HuLivenessCheck.java" \
+  "$project_dir/app/src/main/java/com/projection/car/VideoHeartbeat.java" \
+  "$project_dir/tools/VideoHeartbeatCheck.java"
 java -cp "$audio_test_dir" com.projection.car.AudioResamplerCheck
 java -cp "$audio_test_dir" com.projection.car.DiagnosticsCheck
 java -cp "$audio_test_dir" com.projection.car.TouchPadTapCheck
@@ -42,3 +44,4 @@ java -cp "$audio_test_dir" com.projection.car.BridgeAudioCheck
 java -cp "$audio_test_dir" com.projection.car.VideoBridgeCheck
 
 java -cp "$audio_test_dir" com.projection.car.HuLivenessCheck
+java -cp "$audio_test_dir" com.projection.car.VideoHeartbeatCheck

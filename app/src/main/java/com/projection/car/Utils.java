@@ -30,6 +30,7 @@ public class Utils {
     public static final int MSG_WRITE_AUDIO = 10;
 
     public static final int MSG_WRITE_VIDEO = 11;
+    public static final int MSG_WRITE_VIDEO_HEARTBEAT = 12;
 
     public static final int MSG_CMD_HU_PROTOCOL_VERSION = 0x00018001;//98305
     public static final int MSG_CMD_HU_INFO = 0x00018003;//98307

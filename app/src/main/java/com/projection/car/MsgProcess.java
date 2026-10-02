@@ -205,6 +205,9 @@ public class MsgProcess {
         log("[BRIDGE] direct CarPlay video=" + enabled + "; target=" + (int)mVISWidth + "x" + (int)mVISHeight);
     }
     private final HuLiveness mHuLiveness = new HuLiveness();
+    private final VideoHeartbeat mVideoHeartbeat = new VideoHeartbeat();
+    private long mVideoFramesWritten, mVideoBytesWritten, mVideoHeartbeatsWritten;
+    private long mLastVideoFrameAt, mLastVideoDiagnosticAt;
     private final VideoQueueBudget mVideoBudget = new VideoQueueBudget();
     private long mSessionStartedAt;
     private volatile long mLastReadAt;
@@ -311,12 +314,16 @@ public class MsgProcess {
         mInputStream = new AccessoryInputStream(in);
         mSessionStartedAt = SystemClock.elapsedRealtime();
         mHuLiveness.reset(mSessionStartedAt);
+        mVideoHeartbeat.reset(mSessionStartedAt);
+        mVideoFramesWritten = mVideoBytesWritten = mVideoHeartbeatsWritten = 0;
+        mLastVideoFrameAt = mLastVideoDiagnosticAt = mSessionStartedAt;
         watchHu(generation);
         mLastReadAt = mLastWriteAt = mSessionStartedAt;
         mLastReadType = mLastWriteType = 0;
         log("[USB] START generation=" + generation + " readBuffer=16384");
         mOutputStream = out;
         mUsbReadHandler.obtainMessage(0, generation, 0).sendToTarget();
+        watchVideoTransport(generation);
 
     }
 
@@ -328,6 +335,31 @@ public class MsgProcess {
                 resetUsb("HU_SILENT_TIMEOUT idleMs=" + mHuLiveness.idle(now));
             } else watchHu(generation);
         }, 1000);
+    }
+
+    private void watchVideoTransport(final int generation) {
+        // Use the existing serialized USB writer, not the Activity/UI looper.
+        // Only one scheduled tick exists for this generation; no heartbeat backlog.
+        mUsbWriteHandler.postDelayed(() -> {
+            synchronized (MsgProcess.this) {
+                if (!usbOk || mReleased || generation != mUsbGeneration) return;
+                long now = SystemClock.elapsedRealtime();
+                if (mHuVideoStarted && mMediaCodecTool.getMediaProjection() != null
+                        && mVideoHeartbeat.due(now)) {
+                    mUsbWriteHandler.obtainMessage(Utils.MSG_WRITE_VIDEO_HEARTBEAT, generation, 0).sendToTarget();
+                }
+                if (now - mLastVideoDiagnosticAt >= 2000) {
+                    mLastVideoDiagnosticAt = now;
+                    log("[VIDEO-FLOW] source=" + (mDirectVideoActive ? "direct" : "projection")
+                            + " sentFrames=" + mVideoFramesWritten + " sentBytes=" + mVideoBytesWritten
+                            + " frameIdleMs=" + (now - mLastVideoFrameAt)
+                            + " heartbeats=" + mVideoHeartbeatsWritten
+                            + " huReadIdleMs=" + (now - mLastReadAt)
+                            + " pending=" + mVideoBudget.frames() + " dropped=" + mVideoBudget.dropped());
+                }
+            }
+            watchVideoTransport(generation);
+        }, VideoHeartbeat.INTERVAL_MS);
     }
 
     public boolean mediaPermissionOk(Activity activity, int resultCode, Intent resultData) {
@@ -382,7 +414,9 @@ public class MsgProcess {
                 + " readIdleMs=" + (now - mLastReadAt) + " lastReadType=" + mLastReadType
                 + " writeIdleMs=" + (now - mLastWriteAt) + " lastWriteType=" + mLastWriteType
                 + " videoPending=" + mVideoBudget.frames() + " videoBytes=" + mVideoBudget.bytes()
-                + " videoDropped=" + mVideoBudget.dropped() + " audioPending=" + mPendingAudioPackets.get());
+                + " videoDropped=" + mVideoBudget.dropped() + " audioPending=" + mPendingAudioPackets.get()
+                + " videoSentFrames=" + mVideoFramesWritten + " videoFrameIdleMs=" + (now - mLastVideoFrameAt)
+                + " videoHeartbeats=" + mVideoHeartbeatsWritten);
         usbOk = false;
         mHuVideoInitialized = mHuVideoStarted = false;
         CarPlayVideoBridge.invalidate();
@@ -1697,6 +1731,22 @@ public class MsgProcess {
                 try {
                     if (!usbOk || mReleased || output == null || generation != mUsbGeneration) return;
                     switch (msg.what) {
+                        case Utils.MSG_WRITE_VIDEO_HEARTBEAT: {
+                            synchronized (MsgProcess.this) {
+                                if (!mHuVideoStarted || mMediaCodecTool.getMediaProjection() == null
+                                        || !mVideoHeartbeat.due(SystemClock.elapsedRealtime())) return;
+                            }
+                            output.write(VideoHeartbeat.packet(System.currentTimeMillis()));
+                            synchronized (MsgProcess.this) {
+                                if (generation == mUsbGeneration) {
+                                    mVideoHeartbeat.written(SystemClock.elapsedRealtime());
+                                    mVideoHeartbeatsWritten++;
+                                    if (mVideoHeartbeatsWritten == 1 || mVideoHeartbeatsWritten % 10 == 0)
+                                        log("[VIDEO] heartbeat USB sent count=" + mVideoHeartbeatsWritten);
+                                }
+                            }
+                        }
+                        break;
                         case MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS:
                         case MSG_CMD_MD_INFO:
                         case MSG_CMD_FOREGROUND:
@@ -1766,6 +1816,15 @@ public class MsgProcess {
                             if (msg.what == MSG_WRITE_VIDEO && carMsg.videoEpoch != mVideoSourceEpoch) break;
                             output.write(carMsg.head);
                             output.write(carMsg.msg);
+                            if (msg.what == MSG_WRITE_VIDEO) {
+                                synchronized (MsgProcess.this) {
+                                    if (generation == mUsbGeneration) {
+                                        mLastVideoFrameAt = SystemClock.elapsedRealtime();
+                                        mVideoHeartbeat.written(mLastVideoFrameAt);
+                                        mVideoFramesWritten++; mVideoBytesWritten += carMsg.videoBytes;
+                                    }
+                                }
+                            }
                             if (carMsg.videoStats != null) {
                                 long frames = carMsg.videoStats.frames.incrementAndGet();
                                 long bytes = carMsg.videoStats.bytes.addAndGet(carMsg.videoBytes);
