@@ -155,8 +155,8 @@ public class MsgProcess {
     private int mVideoFrame = 0;
     private volatile boolean mCarLifeMediaAudioEnabled = true;
     private volatile boolean mTtsAudioCompatibilityEnabled;
-    private volatile int mTtsSampleRate = 16000;
-    private volatile int mTtsChannels = 1;
+    private volatile int mTtsSampleRate = 48000;
+    private final int mTtsChannels = 1;
     private int mTtsWireChannels = 1;
     private volatile int mCarAudioVolumePercent;
     private final PcmVolume mPcmVolume;
@@ -180,11 +180,10 @@ public class MsgProcess {
                 .getBoolean("tts_audio_compatibility", false);
 
         SharedPreferences audioPrefs = context.getSharedPreferences("set", MODE_PRIVATE);
-        mTtsSampleRate = audioPrefs.getInt("tts_sample_rate", 16000);
-        mTtsChannels = audioPrefs.getInt("tts_channels", 1) == 2 ? 2 : 1;
+        mTtsSampleRate = audioPrefs.getInt("tts_sample_rate", 48000);
         boolean validRate = false;
         for (int rate : TtsPcmConverter.RATES) validRate |= mTtsSampleRate == rate;
-        if (!validRate) mTtsSampleRate = 16000;
+        if (!validRate) mTtsSampleRate = 48000;
         mCarAudioVolumePercent = Math.max(0, Math.min(100,
                 context.getSharedPreferences("set", MODE_PRIVATE).getInt("car_audio_volume", 30)));
         mPcmVolume = new PcmVolume(mCarAudioVolumePercent / 100.0);
@@ -313,12 +312,11 @@ public class MsgProcess {
         mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_RECONFIGURE);
     }
 
-    public void updateTtsAudioFormat(int sampleRate, int channels) {
-        if (mTtsSampleRate == sampleRate && mTtsChannels == channels) return;
+    public void updateTtsAudioFormat(int sampleRate) {
+        if (mTtsSampleRate == sampleRate) return;
         mCancelAudioTest = true;
         mTtsSampleRate = sampleRate;
-        mTtsChannels = channels;
-        log("[TTS-AUDIO] selected rate=" + sampleRate + " channels=" + channels);
+        log("[TTS-AUDIO] selected rate=" + sampleRate + " channels=1");
         mAudioReadHandler.sendEmptyMessage(AudioHandler.AUDIO_RECONFIGURE);
     }
 

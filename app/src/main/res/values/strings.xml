@@ -77,14 +77,12 @@
     <string name="car_audio_volume">车机输出音量</string>
     <string name="car_audio_volume_value">%1$d%%</string>
     <string name="car_audio_volume_summary">实时调整发送给车机的 USB 音频，默认 30%。0% 为车机静音，100% 为此前原始输出。也影响测试音；手机扬声器音量仍由手机控制。</string>
-    <string name="tts_music_enhanced">TTS 音频规格（实验）</string>
-    <string name="tts_music_enhanced_summary">默认 16 kHz 单声道已实车验证。其他组合用于测试更高音质，尚未验证车机支持；如无声或异常，选回 16 kHz 单声道。切换立即生效。</string>
-    <string name="audio_test_enhanced_tts">TTS 选中规格测试音（实验）</string>
-    <string name="tts_format_label">TTS 音乐音质 / 规格组合（实验）</string>
+    <string name="tts_music_enhanced">TTS 音频采样率</string>
+    <string name="tts_music_enhanced_summary">默认 48 kHz 单声道。此车机各采样率均可播放，双声道未呈现立体声效果，因此固定单声道；如遇无声、卡顿或异常，可在下拉菜单选择较低采样率，切换立即生效。</string>
+    <string name="audio_test_enhanced_tts">TTS 当前采样率测试音</string>
+    <string name="tts_format_label">TTS 采样率（默认 48 kHz 单声道）</string>
     <string name="tts_sample_rate_label">TTS 采样率</string>
-    <string name="tts_channels_label">TTS 声道数</string>
     <string-array name="tts_sample_rates">
-        <item>16 kHz</item><item>24 kHz</item><item>32 kHz</item><item>44.1 kHz</item><item>48 kHz</item>
+        <item>16 kHz</item><item>24 kHz</item><item>32 kHz</item><item>44.1 kHz</item><item>48 kHz（默认）</item>
     </string-array>
-    <string-array name="tts_channels"><item>单声道</item><item>双声道</item></string-array>
 </resources>

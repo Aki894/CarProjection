@@ -2,6 +2,8 @@
 
 本项目基于carlife 协议投屏，安卓10以上无需root，可反向触控，仅用作研究学习
 
+[v0.3.7 默认 48 kHz 单声道与备选采样率](docs/v0.3.7-mono-default.md)
+
 [v0.3.6 实验性音乐增强测试说明](docs/v0.3.6-music-enhanced.md)
 
 [v0.3.5 车机输出音量与手机同步播放说明](docs/v0.3.5-audio-volume.md)

@@ -237,11 +237,6 @@
                         android:layout_width="match_parent"
                         android:layout_height="48dp"
                         android:contentDescription="@string/tts_sample_rate_label" />
-                    <Spinner
-                        android:id="@+id/ttsChannelsSpinner"
-                        android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:contentDescription="@string/tts_channels_label" />
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"

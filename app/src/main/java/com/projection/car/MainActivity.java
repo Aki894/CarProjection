@@ -152,29 +152,28 @@ public class MainActivity extends AppCompatActivity {
         );
         binding.ttsSampleRateSpinner.setAdapter(ArrayAdapter.createFromResource(this,
                 R.array.tts_sample_rates, android.R.layout.simple_spinner_dropdown_item));
-        binding.ttsChannelsSpinner.setAdapter(ArrayAdapter.createFromResource(this,
-                R.array.tts_channels, android.R.layout.simple_spinner_dropdown_item));
-        int savedRate = preferences.getInt("tts_sample_rate", 16000);
-        int selectedRate = 0;
+        // Apply the proven mono default once on upgrade, then retain fallback choices.
+        if (!preferences.getBoolean("tts_mono_defaults_v1", false)) {
+            preferences.edit().putInt("tts_sample_rate", 48000)
+                    .putInt("tts_channels", 1).putBoolean("tts_mono_defaults_v1", true).apply();
+        }
+        int savedRate = preferences.getInt("tts_sample_rate", 48000);
+        int selectedRate = TtsPcmConverter.RATES.length - 1;
         for (int i = 0; i < TtsPcmConverter.RATES.length; i++) {
             if (TtsPcmConverter.RATES[i] == savedRate) selectedRate = i;
         }
         binding.ttsSampleRateSpinner.setSelection(selectedRate);
-        binding.ttsChannelsSpinner.setSelection(preferences.getInt("tts_channels", 1) == 2 ? 1 : 0);
         AdapterView.OnItemSelectedListener formatListener = new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                 int rateIndex = binding.ttsSampleRateSpinner.getSelectedItemPosition();
-                int channelIndex = binding.ttsChannelsSpinner.getSelectedItemPosition();
-                if (rateIndex < 0 || channelIndex < 0) return;
+                if (rateIndex < 0) return;
                 int rate = TtsPcmConverter.RATES[rateIndex];
-                int channels = channelIndex + 1;
-                preferences.edit().putInt("tts_sample_rate", rate).putInt("tts_channels", channels).apply();
-                if (msgProcess != null) msgProcess.updateTtsAudioFormat(rate, channels);
+                preferences.edit().putInt("tts_sample_rate", rate).putInt("tts_channels", 1).apply();
+                if (msgProcess != null) msgProcess.updateTtsAudioFormat(rate);
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
         };
         binding.ttsSampleRateSpinner.setOnItemSelectedListener(formatListener);
-        binding.ttsChannelsSpinner.setOnItemSelectedListener(formatListener);
         int carVolume = Math.max(0, Math.min(100, preferences.getInt("car_audio_volume", 30)));
         binding.carAudioVolumeSlider.setValue(carVolume);
         binding.carAudioVolumeValue.setText(getString(R.string.car_audio_volume_value, carVolume));
@@ -848,7 +847,7 @@ public class MainActivity extends AppCompatActivity {
                 .append("TTS compatibility=").append(binding.ttsAudioCompatibilitySwitch.isChecked())
                 .append(" USB media=").append(binding.carLifeMediaAudioSwitch.isChecked()).append('\n')
                 .append("TTS sample rate=").append(binding.ttsSampleRateSpinner.getSelectedItem())
-                .append(" channels=").append(binding.ttsChannelsSpinner.getSelectedItem()).append('\n')
+                .append(" channels=mono").append('\n')
                 .append("Car audio PCM volume=").append(Math.round(binding.carAudioVolumeSlider.getValue()))
                 .append("%\n")
                 .append("RECORD_AUDIO granted=").append(ContextCompat.checkSelfPermission(this,
@@ -873,7 +872,6 @@ public class MainActivity extends AppCompatActivity {
     private void updateAudioModeControls() {
         boolean tts = binding.ttsAudioCompatibilitySwitch.isChecked();
         binding.ttsSampleRateSpinner.setEnabled(tts);
-        binding.ttsChannelsSpinner.setEnabled(tts);
         binding.carLifeMediaAudioSwitch.setEnabled(!tts);
         binding.audioTestToneButton.setEnabled(!tts);
         binding.audioTest44kButton.setEnabled(!tts);
