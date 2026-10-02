@@ -23,14 +23,32 @@ public final class CarPlayAudioBridgeService extends Service {
     private final Binder binder = new Binder() {
         @Override protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
             if (code == INTERFACE_TRANSACTION) { reply.writeString(DESCRIPTOR); return true; }
-            if (code < FIRST_CALL_TRANSACTION || code > FIRST_CALL_TRANSACTION + 2)
+            if (code < FIRST_CALL_TRANSACTION || code > FIRST_CALL_TRANSACTION + 5)
                 return super.onTransact(code, data, reply, flags);
             data.enforceInterface(DESCRIPTOR);
             enforceClient();
             if (code == FIRST_CALL_TRANSACTION + 1) {
                 reply.writeNoException(); reply.writeInt(CarPlayAudioBridge.ready() ? 1 : 0); return true;
             }
+            if (code == FIRST_CALL_TRANSACTION + 4) {
+                reply.writeNoException();
+                for (int value : CarPlayVideoBridge.status()) reply.writeInt(value);
+                return true;
+            }
             IBinder owner = data.readStrongBinder();
+            if (code == FIRST_CALL_TRANSACTION + 5) {
+                CarPlayVideoBridge.close(Binder.getCallingUid(), owner);
+                reply.writeNoException(); return true;
+            }
+            if (code == FIRST_CALL_TRANSACTION + 3) {
+                int width = data.readInt(), height = data.readInt();
+                try {
+                    ParcelFileDescriptor fd = CarPlayVideoBridge.open(Binder.getCallingUid(), owner, width, height);
+                    reply.writeNoException(); reply.writeInt(fd == null ? 0 : 1);
+                    if (fd != null) fd.writeToParcel(reply, Parcelable.PARCELABLE_WRITE_RETURN_VALUE);
+                } catch (IOException e) { reply.writeException(new IllegalStateException("Video pipe unavailable", e)); }
+                return true;
+            }
             if (code == FIRST_CALL_TRANSACTION + 2) {
                 CarPlayAudioBridge.close(Binder.getCallingUid(), owner);
                 reply.writeNoException(); return true;
@@ -46,5 +64,5 @@ public final class CarPlayAudioBridgeService extends Service {
         }
     };
     @Nullable @Override public IBinder onBind(Intent intent) { return binder; }
-    @Override public void onDestroy() { CarPlayAudioBridge.invalidate(); super.onDestroy(); }
+    @Override public void onDestroy() { CarPlayAudioBridge.invalidate(); CarPlayVideoBridge.invalidate(); super.onDestroy(); }
 }

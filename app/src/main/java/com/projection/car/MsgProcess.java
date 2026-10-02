@@ -131,6 +131,79 @@ public class MsgProcess {
         @Override public void start() { postAudio(AudioHandler.AUDIO_START); }
     };
     private final AtomicInteger mPendingAudioPackets = new AtomicInteger();
+    private volatile boolean mDirectCarPlayVideoEnabled;
+    private volatile boolean mHuVideoInitialized, mHuVideoStarted, mDirectVideoActive;
+    private volatile int mVideoSourceEpoch, mVideoRecoverySequence;
+    private long mDirectVideoToken, mDirectVideoFrames, mDirectVideoBytes;
+    private byte[] mDirectVideoConfig;
+    private VideoWriteStats mDirectVideoWriteStats = new VideoWriteStats();
+    private boolean mDirectVideoWaiting = true;
+    private final CarPlayVideoBridge.Sink mVideoBridgeSink = new CarPlayVideoBridge.Sink() {
+        @Override public int[] status() {
+            boolean target = mDirectCarPlayVideoEnabled && usbOk && !mReleased && mHuVideoInitialized;
+            boolean ready = target && mHuVideoStarted && mMediaCodecTool != null
+                    && mMediaCodecTool.getMediaProjection() != null;
+            return new int[]{ready ? 1 : 0, target ? (int)mVISWidth : 0,
+                    target ? (int)mVISHeight : 0, Math.max(1, Math.min(60, mVideoBit)), mVideoRecoverySequence};
+        }
+        @Override public boolean config(long token, byte[] parameterSets, int width, int height) {
+            synchronized (MsgProcess.this) {
+                int[] state = status();
+                if (state[0] == 0 || width != state[1] || height != state[2]) return false;
+                if (mDirectVideoToken == token && java.util.Arrays.equals(mDirectVideoConfig, parameterSets)) return true;
+                if (mDirectVideoActive) resetVideoSource(false);
+                mDirectVideoToken = token; mDirectVideoConfig = parameterSets;
+                mDirectVideoWaiting = true; mDirectVideoFrames = mDirectVideoBytes = 0;
+                mDirectVideoWriteStats = new VideoWriteStats();
+                return true;
+            }
+        }
+        @Override public void frame(long token, byte[] data) {
+            synchronized (MsgProcess.this) {
+                if (token != mDirectVideoToken || status()[0] == 0 || mDirectVideoConfig == null) return;
+                boolean key = H264BridgeFrames.keyFrame(data);
+                if (mDirectVideoWaiting && !key) return;
+                if (key && data.length > H264BridgeFrames.MAX_FRAME - mDirectVideoConfig.length) return;
+                if (!mDirectVideoActive) {
+                    if (!key) return;
+                    resetVideoSource(true);
+                    log("[BRIDGE] video direct active=" + (int)mVISWidth + "x" + (int)mVISHeight + " H.264");
+                }
+                byte[] packet = data;
+                if (key) {
+                    packet = new byte[mDirectVideoConfig.length + data.length];
+                    System.arraycopy(mDirectVideoConfig, 0, packet, 0, mDirectVideoConfig.length);
+                    System.arraycopy(data, 0, packet, mDirectVideoConfig.length, data.length);
+                }
+                if (!enqueueVideo(packet, key, mUsbGeneration, true)) {
+                    mDirectVideoWaiting = true; return;
+                }
+                mDirectVideoWaiting = false; mDirectVideoFrames++; mDirectVideoBytes += packet.length;
+                if (mDirectVideoFrames == 1 || mDirectVideoFrames % 150 == 0)
+                    log("[BRIDGE] video queued frames=" + mDirectVideoFrames + " bytes=" + mDirectVideoBytes);
+            }
+        }
+        @Override public void ended(long token) {
+            synchronized (MsgProcess.this) {
+                if (mDirectVideoToken != token) return;
+                mDirectVideoToken = 0; mDirectVideoConfig = null; mDirectVideoWaiting = true;
+                if (mDirectVideoActive) {
+                    resetVideoSource(false);
+                    if (mMediaCodecTool != null) mMediaCodecTool.requestKeyFrame();
+                    log("[BRIDGE] video fallback=screen projection");
+                }
+            }
+        }
+    };
+    private synchronized void resetVideoSource(boolean direct) {
+        mDirectVideoActive = direct; mVideoSourceEpoch++;
+        mUsbWriteHandler.removeMessages(MSG_WRITE_VIDEO); mVideoBudget.reset();
+    }
+    public void updateDirectCarPlayVideoEnabled(boolean enabled) {
+        mDirectCarPlayVideoEnabled = enabled;
+        CarPlayVideoBridge.invalidate();
+        log("[BRIDGE] direct CarPlay video=" + enabled + "; target=" + (int)mVISWidth + "x" + (int)mVISHeight);
+    }
     private final VideoQueueBudget mVideoBudget = new VideoQueueBudget();
     private long mSessionStartedAt;
     private volatile long mLastReadAt;
@@ -191,6 +264,8 @@ public class MsgProcess {
         mInfoListener = infoListener;
         mVideoBit = bit;
         mVideoFrame = frame;
+        mDirectCarPlayVideoEnabled = context.getSharedPreferences("set", MODE_PRIVATE)
+                .getBoolean("direct_carplay_video", false);
         mDirectCarPlayAudioEnabled = context.getSharedPreferences("set", MODE_PRIVATE)
                 .getBoolean("direct_carplay_audio", false);
         mCarLifeMediaAudioEnabled = context.getSharedPreferences("set", MODE_PRIVATE)
@@ -229,6 +304,8 @@ public class MsgProcess {
         mHuContentEncryption = null;
         notifyAudioFeatureStatus();
         usbOk = true;
+        mHuVideoInitialized = mHuVideoStarted = false;
+        CarPlayVideoBridge.attach(mVideoBridgeSink);
         CarPlayAudioBridge.attach(mBridgeSink);
         mInputStream = new AccessoryInputStream(in);
         mSessionStartedAt = SystemClock.elapsedRealtime();
@@ -262,6 +339,7 @@ public class MsgProcess {
                         if (permissionGeneration != mUsbGeneration || mReleased) return;
                         mCancelAudioTest = true;
                         CarPlayAudioBridge.invalidate();
+                        CarPlayVideoBridge.invalidate();
                         postAudio(AudioHandler.AUDIO_STOP);
                         mMainHandler.post(() -> {
                             if (!mReleased && usbOk && permissionGeneration == mUsbGeneration && mInfoListener != null) mInfoListener.onProjectionStopped();
@@ -293,6 +371,8 @@ public class MsgProcess {
                 + " videoPending=" + mVideoBudget.frames() + " videoBytes=" + mVideoBudget.bytes()
                 + " videoDropped=" + mVideoBudget.dropped() + " audioPending=" + mPendingAudioPackets.get());
         usbOk = false;
+        mHuVideoInitialized = mHuVideoStarted = false;
+        CarPlayVideoBridge.invalidate();
         CarPlayAudioBridge.invalidate();
         final int audioStopGeneration = mUsbGeneration;
         final int closedGeneration = ++mUsbGeneration;
@@ -322,6 +402,7 @@ public class MsgProcess {
 
     public void release() {
         mReleased = true;
+        CarPlayVideoBridge.detach(mVideoBridgeSink);
         CarPlayAudioBridge.detach(mBridgeSink);
         resetUsb("ACTIVITY_DESTROY");
         postAudio(AudioHandler.AUDIO_STOP);
@@ -492,15 +573,15 @@ public class MsgProcess {
     }
 
 
-    private synchronized void enqueueVideo(byte[] data, boolean keyFrame, int generation) {
-        if (!usbOk || mReleased || generation != mUsbGeneration) return;
+    private synchronized boolean enqueueVideo(byte[] data, boolean keyFrame, int generation, boolean direct) {
+        if (!usbOk || mReleased || generation != mUsbGeneration || direct != mDirectVideoActive) return false;
         if (!mVideoBudget.admit(data.length, keyFrame)) {
             if (mVideoBudget.shouldRequestKeyFrame(SystemClock.elapsedRealtime())) {
                 log("[VIDEO] backlog bounded; waiting for key frame pending=" + mVideoBudget.frames()
                         + " bytes=" + mVideoBudget.bytes() + " dropped=" + mVideoBudget.dropped());
-                mMediaCodecTool.requestKeyFrame();
+                if (direct) mVideoRecoverySequence++; else mMediaCodecTool.requestKeyFrame();
             }
-            return;
+            return false;
         }
         byte[] carLifeMsg = exportVideoMsg(MSG_VIDEO_DATA, data);
         byte[] headmsg = new byte[8];
@@ -508,8 +589,13 @@ public class MsgProcess {
         intToBytes2(carLifeMsg.length, headmsg, 4);
         CarMsg carMsg = new CarMsg(headmsg, carLifeMsg);
         carMsg.videoBytes = data.length;
-        if (!mUsbWriteHandler.sendMessage(mUsbWriteHandler.obtainMessage(MSG_WRITE_VIDEO, generation, 0, carMsg)))
-            mVideoBudget.complete(data.length);
+        carMsg.videoEpoch = mVideoSourceEpoch;
+        carMsg.directVideo = direct;
+        if (direct) carMsg.videoStats = mDirectVideoWriteStats;
+        if (!mUsbWriteHandler.sendMessage(mUsbWriteHandler.obtainMessage(MSG_WRITE_VIDEO, generation, 0, carMsg))) {
+            mVideoBudget.complete(data.length); return false;
+        }
+        return true;
     }
 
     private void dispatchMediaKey(int keyCode) {
@@ -1286,6 +1372,7 @@ public class MsgProcess {
                                                     CarlifeVideoEncoderInfoProto.CarlifeVideoEncoderInfo encoderInfo = CarlifeVideoEncoderInfoProto.CarlifeVideoEncoderInfo.parseFrom(msgdata);
                                                     log("encoderInfo = " + encoderInfo.getWidth() + ", " + encoderInfo.getHeight() + ", " + encoderInfo.getFrameRate());
                                                     if (encoderInfo.getWidth() > 10 && encoderInfo.getHeight() > 10) {
+                                                        mHuVideoInitialized = true;
                                                         mVISWidth = encoderInfo.getWidth();
                                                         mVISHeight = encoderInfo.getHeight();
                                                         refreshSize();
@@ -1642,6 +1729,7 @@ public class MsgProcess {
                         }
                         break;
                         case MSG_CMD_VIDEO_ENCODER_START: {
+                            mHuVideoStarted = true;
                             log("now start MSG_CMD_VIDEO_ENCODER_START");
 
                             // Audio INIT belongs to capture startup, after projection permission.
@@ -1650,7 +1738,7 @@ public class MsgProcess {
                             mMainHandler.post(() -> {
                                 if (!usbOk || mReleased || generation != mUsbGeneration) return;
                                 mMediaCodecTool.startProjection(mContext,
-                                        (data, keyFrame) -> enqueueVideo(data, keyFrame, generation),
+                                        (data, keyFrame) -> enqueueVideo(data, keyFrame, generation, false),
                                         REQUEST_CODE, mVISWidth, mVISHeight, mVideoBit, mVideoFrame);
                             });
                         }
@@ -1659,8 +1747,15 @@ public class MsgProcess {
                         case MSG_WRITE_VIDEO: {
                             //log("write audio or video ..................." + msg.what);
                             CarMsg carMsg = (CarMsg) msg.obj;
+                            if (msg.what == MSG_WRITE_VIDEO && carMsg.videoEpoch != mVideoSourceEpoch) break;
                             output.write(carMsg.head);
                             output.write(carMsg.msg);
+                            if (carMsg.videoStats != null) {
+                                long frames = carMsg.videoStats.frames.incrementAndGet();
+                                long bytes = carMsg.videoStats.bytes.addAndGet(carMsg.videoBytes);
+                                if (frames == 1 || frames % 150 == 0)
+                                    log("[BRIDGE] video USB sent frames=" + frames + " bytes=" + bytes);
+                            }
                             if (carMsg.audioStats != null) {
                                 carMsg.audioStats.bytes.addAndGet(carMsg.msg.length - 12);
                                 carMsg.audioStats.packets.incrementAndGet();
@@ -1682,7 +1777,8 @@ public class MsgProcess {
                 } finally {
                     if (msg.what == MSG_WRITE_VIDEO && msg.obj instanceof CarMsg) {
                         synchronized (MsgProcess.this) {
-                            if (generation == mUsbGeneration) mVideoBudget.complete(((CarMsg) msg.obj).videoBytes);
+                            CarMsg videoMsg = (CarMsg) msg.obj;
+                            if (generation == mUsbGeneration && videoMsg.videoEpoch == mVideoSourceEpoch) mVideoBudget.complete(videoMsg.videoBytes);
                         }
                     }
                     if (msg.what == MSG_WRITE_AUDIO) {
@@ -1728,9 +1824,16 @@ public class MsgProcess {
         final AtomicLong packets = new AtomicLong();
     }
 
+    private static final class VideoWriteStats {
+        final AtomicLong frames = new AtomicLong(), bytes = new AtomicLong();
+    }
+
     static class CarMsg {
+        VideoWriteStats videoStats;
         AudioWriteStats audioStats;
         int videoBytes;
+        int videoEpoch;
+        boolean directVideo;
         byte[] head;
         byte[] msg;
 

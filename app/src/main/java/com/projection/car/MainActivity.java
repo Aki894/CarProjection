@@ -189,6 +189,11 @@ public class MainActivity extends AppCompatActivity {
         binding.lockCursorDuringDragSwitch.setChecked(
                 preferences.getBoolean("lock_cursor_during_drag", false)
         );
+        binding.directCarPlayVideoSwitch.setChecked(preferences.getBoolean("direct_carplay_video", false));
+        binding.directCarPlayVideoSwitch.setOnCheckedChangeListener((button, checked) -> {
+            preferences.edit().putBoolean("direct_carplay_video", checked).apply();
+            if (msgProcess != null) msgProcess.updateDirectCarPlayVideoEnabled(checked);
+        });
         binding.directCarPlayAudioSwitch.setChecked(preferences.getBoolean("direct_carplay_audio", false));
         binding.directCarPlayAudioSwitch.setOnCheckedChangeListener((button, checked) -> {
             preferences.edit().putBoolean("direct_carplay_audio", checked).apply();
@@ -1006,6 +1011,7 @@ public class MainActivity extends AppCompatActivity {
                 .append("Android ").append(Build.VERSION.RELEASE)
                 .append(" / SDK ").append(Build.VERSION.SDK_INT)
                 .append(" / ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n')
+                .append("Direct CarPlay video=").append(binding.directCarPlayVideoSwitch.isChecked()).append('\n')
                 .append("Direct CarPlay audio=").append(binding.directCarPlayAudioSwitch.isChecked()).append('\n')
                 .append("TTS compatibility=").append(binding.ttsAudioCompatibilitySwitch.isChecked())
                 .append(" USB media=").append(binding.carLifeMediaAudioSwitch.isChecked()).append('\n')

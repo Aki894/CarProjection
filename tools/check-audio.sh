@@ -24,7 +24,9 @@ java -m jdk.compiler/com.sun.tools.javac.Main -d "$audio_test_dir" \
   "$project_dir/app/src/main/java/com/projection/car/ProjectionBridge.java" \
   "$project_dir/tools/ProjectionBridgeCheck.java" \
   "$project_dir/app/src/main/java/com/projection/car/BridgePcmMixer.java" \
-  "$project_dir/tools/BridgeAudioCheck.java"
+  "$project_dir/tools/BridgeAudioCheck.java" \
+  "$project_dir/app/src/main/java/com/projection/car/H264BridgeFrames.java" \
+  "$project_dir/tools/VideoBridgeCheck.java"
 java -cp "$audio_test_dir" com.projection.car.AudioResamplerCheck
 java -cp "$audio_test_dir" com.projection.car.DiagnosticsCheck
 java -cp "$audio_test_dir" com.projection.car.TouchPadTapCheck
@@ -34,3 +36,5 @@ java -cp "$audio_test_dir" com.projection.car.CursorMotionCheck
 java -cp "$audio_test_dir" com.projection.car.ConnectionStabilityCheck
 java -cp "$audio_test_dir" com.projection.car.ProjectionBridgeCheck
 java -cp "$audio_test_dir" com.projection.car.BridgeAudioCheck
+
+java -cp "$audio_test_dir" com.projection.car.VideoBridgeCheck
