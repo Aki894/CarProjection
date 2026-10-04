@@ -14,6 +14,7 @@ import select
 import signal
 import struct
 import subprocess
+import tempfile
 import time
 
 GADGET = Path('/sys/kernel/config/usb_gadget/carlife-probe')
@@ -99,9 +100,61 @@ def log(event, **values):
                           event=event, **values), ensure_ascii=False), flush=True)
 
 
-def run(*args):
+def run(*args, timeout=15, check=True):
     log('system_command', command=list(args))
-    subprocess.run(args, check=True, timeout=15)
+    # subprocess.run kills then waits without a deadline on timeout. A modprobe
+    # stuck in kernel D state can therefore hang the Python caller indefinitely.
+    # Do not let a stuck child inherit the logging pipe and keep tee alive either.
+    with tempfile.TemporaryFile() as output:
+        process = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=output,
+                                   stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            code = process.wait(timeout=timeout)
+        except BaseException as error:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                log('system_command_stuck', pid=process.pid,
+                    note='may be in uninterruptible kernel sleep; inspect ps and /proc/PID/stack')
+            if isinstance(error, subprocess.TimeoutExpired):
+                raise TimeoutError(f'command timed out: {args}; child PID={process.pid}') from error
+            raise
+        output.seek(0)
+        detail = output.read(4096).decode(errors='replace').strip()
+        if detail:
+            log('system_command_output', output=detail)
+        if check and code:
+            raise subprocess.CalledProcessError(code, args)
+        return code
+
+
+def serial_users():
+    """Report only process names/PIDs, not command lines or other FD targets."""
+    users = []
+    deadline = time.monotonic() + 2
+    for process in Path('/proc').iterdir():
+        if time.monotonic() > deadline or len(users) >= 8:
+            break
+        if not process.name.isdigit():
+            continue
+        try:
+            for fd in (process / 'fd').iterdir():
+                if time.monotonic() > deadline:
+                    break
+                try:
+                    target = os.readlink(fd)
+                except OSError:
+                    continue
+                if target.startswith('/dev/ttyGS0'):
+                    users.append(dict(pid=int(process.name), name=(process / 'comm').read_text().strip()))
+                    break
+        except OSError:
+            continue
+    return users
 
 
 def put(path, value):
@@ -118,6 +171,7 @@ class Gadget:
         self.udc = None
         self.lock = None
         self.stage = 'not_started'
+        self.getty_was_active = False
 
     def progress(self, stage):
         self.stage = stage
@@ -145,6 +199,18 @@ class Gadget:
         if Path('/sys/module/g_serial').exists():
             if not self.release_serial:
                 raise RuntimeError('g_serial occupies UDC; use --release-g-serial over network SSH')
+            if 'ttyGS0' in Path('/proc/consoles').read_text().split():
+                raise RuntimeError('ttyGS0 is an active kernel console; disable USB console at boot before probing')
+            self.progress('stop_usb_serial_getty')
+            self.getty_was_active = run('systemctl', 'is-active', '--quiet',
+                                       'serial-getty@ttyGS0.service', timeout=5, check=False) == 0
+            if self.getty_was_active:
+                run('systemctl', 'stop', 'serial-getty@ttyGS0.service', timeout=5)
+            users = serial_users()
+            if users:
+                log('usb_serial_busy', processes=users)
+                raise RuntimeError('ttyGS0 is open; close the listed USB serial sessions first')
+            self.progress('release_usb_serial')
             run('modprobe', '-r', 'g_serial')
             self.serial_released = True
             log('usb_serial_released')
@@ -216,6 +282,8 @@ class Gadget:
         if self.serial_released:
             cleanup(lambda: run('modprobe', 'g_serial'))
             log('usb_serial_restore', success=not errors)
+        if self.getty_was_active:
+            cleanup(lambda: run('systemctl', 'start', 'serial-getty@ttyGS0.service', timeout=5))
         if self.lock:
             self.lock.close()
         for error in errors:

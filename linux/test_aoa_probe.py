@@ -1,12 +1,34 @@
 import struct
+import subprocess
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from aoa_probe import Frames, command, descriptors, md_info, reply, serve, strings
+from aoa_probe import Frames, command, descriptors, md_info, reply, run, serve, strings
 
 
 class ProbeTests(unittest.TestCase):
+    def test_kernel_stuck_child_does_not_cause_unbounded_timeout_wait(self):
+        process = Mock(pid=43210)
+        process.wait.side_effect = [subprocess.TimeoutExpired('modprobe', 15),
+                                    subprocess.TimeoutExpired('modprobe', 2)]
+        with patch('aoa_probe.subprocess.Popen', return_value=process) as spawn, \
+                patch('aoa_probe.os.killpg') as kill, patch('aoa_probe.log') as logs:
+            with self.assertRaisesRegex(TimeoutError, '43210'):
+                run('modprobe', '-r', 'g_serial')
+        self.assertEqual([call.kwargs['timeout'] for call in process.wait.call_args_list], [15, 2])
+        kill.assert_called_once()
+        self.assertIsNotNone(spawn.call_args.kwargs['stdout'])
+        self.assertTrue(any(call.args[0] == 'system_command_stuck' for call in logs.call_args_list))
+
+    def test_nonzero_command_can_be_queried_without_aborting(self):
+        process = Mock()
+        process.wait.return_value = 3
+        with patch('aoa_probe.subprocess.Popen', return_value=process), patch('aoa_probe.log'):
+            self.assertEqual(run('systemctl', 'is-active', '--quiet', 'unused', check=False), 3)
+            with self.assertRaises(subprocess.CalledProcessError):
+                run('modprobe', 'missing')
+
     def test_aoa_control_sequence_reenumerates_then_handles_bulk(self):
         def event(request_type, request, index=0, length=0):
             return struct.pack('<BBHHH', request_type, request, 0, index, length) + b'\x04\0\0\0'

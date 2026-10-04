@@ -35,6 +35,13 @@ Device/MD 角色；车机承担 USB Host/HU 角色。
 内核不可中断等待不能靠 Python 计时器强制终止，应结合进程状态/内核日志诊断。
 如 `g_serial` 正被打开的 ttyGS0 占用，程序会拒绝卸载；请关闭该 USB 串口连接，
 用网络 SSH 重试。程序只操作自己的 gadget，拒绝解绑其他 configfs gadget。
+新版会暂停此前正在运行的 `serial-getty@ttyGS0.service`，退出时尝试恢复它；
+其他占用 ttyGS0 的进程会列出 PID/进程名，不自动杀掉。若 ttyGS0 是内核 console，
+拒绝在线切换，需要先更改启动配置。通过网络 SSH 测试，先拔掉 OTG 数据线。
+`modprobe -r g_serial` 仍可能因内核/UDC 阻塞：命令等待 15 秒，SIGKILL 后最多再
+等 2 秒。处于 D 状态的内核等待不能用信号强行解除；程序会报告子进程 PID。
+请另开网络 SSH，运行 `ps -C modprobe,python3,agetty -o pid,ppid,stat,wchan:32,comm`，
+再读取相应 `/proc/PID/stack` 和近期内核日志。存在未结束的卸载进程时，不重复启动。
 Ctrl+C、SIGTERM、异常及 120 秒到时都会尝试解绑/删除本程序 gadget，并恢复原先
 加载的 g_serial；若恢复失败会明确记录 `cleanup_error`，可以 `sudo modprobe g_serial`。
 不在启动时更改网络、蓝牙、持久 USB 设置或自动启用此实验。
