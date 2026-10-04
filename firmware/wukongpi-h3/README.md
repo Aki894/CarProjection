@@ -16,7 +16,7 @@ git -C armbian-build checkout b44a5a2cfc5114477e20fc8f6aaa38058860ab9f
 cp -a firmware/wukongpi-h3/userpatches/. armbian-build/userpatches/
 printf 'Project=CarProjection\nPurpose=H3 hardware bring-up\n' > armbian-build/userpatches/overlay/carlife-firmware-info
 cd armbian-build
-./compile.sh docker carlife-h3 SHOW_LOG=yes SHARE_LOG=no
+./compile.sh carlife-h3 SHOW_LOG=yes SHARE_LOG=no
 ```
 
 产物在 `output/images/`。首次完整构建可能需要较长时间。框架可复用上游组件缓存，缺失时自行编译。

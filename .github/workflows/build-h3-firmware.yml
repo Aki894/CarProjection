@@ -44,7 +44,7 @@ jobs:
           printf 'Project=CarProjection\nProjectCommit=%s\nArmbianCommit=%s\nBoard=orangepizero (WuKongPi H3 compatible)\nPurpose=Hardware bring-up; no Linux CarPlay bridge yet\n' "$GITHUB_SHA" "$ARMBIAN_SHA" > armbian-build/userpatches/overlay/carlife-firmware-info
       - name: Build minimal bootable TF image
         working-directory: armbian-build
-        run: ./compile.sh docker carlife-h3 SHOW_LOG=yes SHARE_LOG=no
+        run: ./compile.sh carlife-h3 SHOW_LOG=yes SHARE_LOG=no
       - name: Collect image, checksums and build manifest
         run: |
           mkdir -p firmware-output
