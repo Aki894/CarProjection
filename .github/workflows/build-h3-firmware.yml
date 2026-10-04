@@ -42,6 +42,10 @@ jobs:
           mkdir -p armbian-build/userpatches
           cp -a firmware/wukongpi-h3/userpatches/. armbian-build/userpatches/
           printf 'Project=CarProjection\nProjectCommit=%s\nArmbianCommit=%s\nBoard=orangepizero (WuKongPi H3 compatible)\nPurpose=Hardware bring-up; no Linux CarPlay bridge yet\n' "$GITHUB_SHA" "$ARMBIAN_SHA" > armbian-build/userpatches/overlay/carlife-firmware-info
+      - name: Register ARM userspace emulator on the build host
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
       - name: Build minimal bootable TF image
         working-directory: armbian-build
         run: ./compile.sh carlife-h3 SHOW_LOG=yes SHARE_LOG=no
@@ -58,6 +62,34 @@ jobs:
           cd firmware-output
           sha256sum -- *.img.xz > SHA256SUMS
           xz -t -- *.img.xz
+      - name: Verify TF boot header and installed root filesystem
+        run: |
+          xz -dk firmware-output/*.img.xz
+          image=$(find firmware-output -name '*.img' -print -quit)
+          python3 - "$image" <<'PY'
+          import sys
+          with open(sys.argv[1], 'rb') as f:
+              f.seek(8196)
+              assert f.read(8) == b'eGON.BT0', 'Missing Allwinner SPL boot magic'
+              f.seek(510)
+              assert f.read(2) == b'\x55\xaa', 'Missing partition-table signature'
+          PY
+          loop=$(sudo losetup --find --show --partscan "$image")
+          mkdir -p image-check
+          trap 'sudo umount image-check 2>/dev/null || true; sudo losetup -d "$loop"; rm -f "$image"' EXIT
+          sudo udevadm settle
+          sudo mount -o ro "${loop}p1" image-check
+          test -f image-check/boot/boot.scr
+          test -f image-check/boot/armbianEnv.txt
+          test -f image-check/etc/carlife-firmware-info
+          test -x image-check/usr/local/sbin/carlife-board-check
+          test -x image-check/usr/sbin/sshd
+          find image-check/boot -name 'sun8i-h2-plus-orangepi-zero.dtb' | tee firmware-output/boot-validation.txt
+          test -s firmware-output/boot-validation.txt
+          sudo umount image-check
+          sudo losetup -d "$loop"
+          rm -f "$image"
+          trap - EXIT
       - name: Upload bootable H3 image
         uses: actions/upload-artifact@v4
         with:
