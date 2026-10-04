@@ -298,6 +298,11 @@ def serve(gadget, duration):
     frames = Frames()
     pending = bytearray()
     seen = set()
+    rx_bytes = 0
+    rx_frames = 0
+    rx_status = None
+    event_names = {0: 'bind', 1: 'unbind', 2: 'enable', 3: 'disable',
+                   4: 'setup', 5: 'suspend', 6: 'resume'}
     while time.monotonic() < deadline:
         ready, _, _ = select.select([gadget.ep0], [], [], 0.1)
         if ready:
@@ -307,7 +312,10 @@ def serve(gadget, duration):
             for offset in range(0, len(data), 12):
                 event = data[offset:offset + 12]
                 kind = event[8]
-                log('functionfs_event', type=kind, mode=mode)
+                log('functionfs_event', type=kind, name=event_names.get(kind, 'unknown'), mode=mode)
+                if kind in (1, 3, 5):
+                    log('usb_session_state', state=event_names[kind], rx_bytes=rx_bytes,
+                        rx_frames=rx_frames, buffered_bytes=len(frames.buffer))
                 if kind == 2:
                     enabled = True
                 elif kind in (1, 3):
@@ -345,12 +353,22 @@ def serve(gadget, duration):
             continue
         try:
             chunk = os.read(gadget.rx, 16384)
+            status = 'data' if chunk else 'empty_read'
         except OSError as error:
             if error.errno in (errno.EAGAIN, errno.ESHUTDOWN, errno.ENODEV):
                 chunk = b''
+                status = errno.errorcode[error.errno]
             else:
                 raise
+        if status != rx_status:
+            log('bulk_rx_state', state=status, previous=rx_status, rx_bytes=rx_bytes)
+            rx_status = status
+        if chunk:
+            rx_bytes += len(chunk)
+            if rx_bytes == len(chunk):
+                log('bulk_first_rx', bytes=len(chunk))
         for channel, frame in frames.feed(chunk):
+            rx_frames += 1
             message = struct.unpack_from('>I', frame, 4)[0] if channel == 1 else None
             log('carlife_rx', channel=channel, bytes=len(frame), message=message)
             response = reply(channel, frame)
@@ -368,7 +386,8 @@ def serve(gadget, duration):
             except OSError as error:
                 if error.errno not in (errno.EAGAIN, errno.ESHUTDOWN, errno.ENODEV):
                     raise
-    log('probe_timeout', seconds=duration, mode=mode)
+    log('probe_timeout', seconds=duration, mode=mode, rx_bytes=rx_bytes,
+        rx_frames=rx_frames, buffered_bytes=len(frames.buffer))
 
 
 def main():

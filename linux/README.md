@@ -57,6 +57,13 @@ Ctrl+C、SIGTERM、异常及 120 秒到时都会尝试解绑/删除本程序 gad
 | carlife_rx / carlife_tx | 收到 CarLife 消息 / 完成初始回复写入 |
 | milestone_video_init | 车机推进到视频参数协商，下一阶段开发入口 |
 
+事件日志同时显示名称：type=5 是 suspend，type=3 是 disable，不能仅凭它们断定
+物理线缆脱落。`bulk_first_rx` 表示收到了原始字节，`carlife_rx` 表示解析出完整帧。
+`usb_session_state` 和 `probe_timeout` 汇总接收字节、完整帧及尚未解析字节数；
+`bulk_rx_state` 仅在端点读状态变化时记录，EAGAIN 表示本次暂无数据。
+若 accessory ENABLE 后没有完整帧，保留结束日志及手机车机端提示，先区分
+主机未发数据、端点未交付数据和分片尚未完整，再继续定位；不记录负载内容。
+
 只有 gadget_bound 不代表 AOA 或 CarLife 成功；只有 accessory_reenumeration 也不代表
 主机已重新枚举。需结合新模式的 ENABLE 和实际 CarLife 数据判断。
 日志不记录 host 提供的 USB 身份字符串全文，也不保存媒体负载。
