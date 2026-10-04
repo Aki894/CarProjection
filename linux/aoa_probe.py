@@ -1,0 +1,320 @@
+#!/usr/bin/env python3
+"""Experimental Linux MD gadget: AOA 1.0 negotiation and first CarLife commands.
+
+No media, input, authentication, heartbeat or CarPlay receiver is implemented.
+Only run over Wi-Fi/Ethernet SSH: temporarily replaces USB serial if requested.
+"""
+import argparse
+import errno
+import fcntl
+import json
+import os
+from pathlib import Path
+import select
+import signal
+import struct
+import subprocess
+import time
+
+GADGET = Path('/sys/kernel/config/usb_gadget/carlife-probe')
+FFS = Path('/run/carlife-ffs')
+MAX_FRAME = 1024 * 1024
+
+
+def descriptors():
+    interface = bytes((9, 4, 0, 0, 2, 255, 255, 0, 1))
+    def speed(size):
+        return interface + b''.join(struct.pack('<BBBBHB', 7, 5, addr, 2, size, 0)
+                                    for addr in (1, 0x82))
+    body = struct.pack('<II', 3, 3) + speed(64) + speed(512)
+    # Forward vendor requests addressed to device, including before configuration.
+    return struct.pack('<III', 3, 12 + len(body), 1 | 2 | 64 | 128) + body
+
+
+def strings():
+    body = struct.pack('<H', 0x409) + b'CarLife AOA probe\0'
+    return struct.pack('<IIII', 2, 16 + len(body), 1, 1) + body
+
+
+def varint(value):
+    output = bytearray()
+    while value >= 128:
+        output.append((value & 127) | 128)
+        value >>= 7
+    return bytes(output) + bytes((value,))
+
+
+def md_info():
+    # Original Android prototype identity fields; isolated compatibility profile.
+    fields = {1: 'Android', 2: 'sun8i-h3', 11: 'carlife-h3', 12: 'linux-probe',
+              16: 'linux-probe', 19: '10', 20: '29'}
+    output = b''
+    for field, value in fields.items():
+        data = value.encode()
+        output += varint(field * 8 + 2) + varint(len(data)) + data
+    return output + varint(21 * 8) + varint(29)
+
+
+def command(message, payload=b''):
+    inner = struct.pack('>HHI', len(payload), 0, message) + payload
+    return struct.pack('>II', 1, len(inner)) + inner
+
+
+class Frames:
+    """USB reads are chunks, not CarLife message boundaries."""
+    def __init__(self):
+        self.buffer = bytearray()
+
+    def feed(self, chunk):
+        self.buffer.extend(chunk)
+        result = []
+        while len(self.buffer) >= 8:
+            channel, size = struct.unpack_from('>II', self.buffer)
+            if channel not in range(1, 7) or size > MAX_FRAME or size < 8:
+                raise ValueError(f'invalid CarLife frame channel={channel} size={size}')
+            if len(self.buffer) < 8 + size:
+                break
+            frame = bytes(self.buffer[8:8 + size])
+            del self.buffer[:8 + size]
+            result.append((channel, frame))
+        return result
+
+
+def reply(channel, frame):
+    if channel != 1:
+        return None
+    length, _, message = struct.unpack_from('>HHI', frame)
+    if length != len(frame) - 8:
+        raise ValueError('CarLife command length mismatch')
+    if message == 0x18001:
+        # Same match-status response as Android reference. Compatibility is unverified.
+        return command(0x10002, b'\x08\x01')
+    if message == 0x18003:
+        return command(0x10004, md_info())
+    return None
+
+
+def log(event, **values):
+    print(json.dumps(dict(time=time.strftime('%Y-%m-%dT%H:%M:%S%z'),
+                          event=event, **values), ensure_ascii=False), flush=True)
+
+
+def run(*args):
+    subprocess.run(args, check=True, timeout=15)
+
+
+def put(path, value):
+    path.write_text(value + '\n')
+
+
+class Gadget:
+    def __init__(self, release_serial):
+        self.release_serial = release_serial
+        self.serial_released = False
+        self.created = False
+        self.mounted = False
+        self.fds = []
+        self.udc = None
+        self.lock = None
+
+    def open(self):
+        self.lock = open('/run/carlife-gadget.lock', 'w')
+        fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        run('modprobe', 'libcomposite')
+        run('modprobe', 'usb_f_fs')
+        if not os.path.ismount('/sys/kernel/config'):
+            raise RuntimeError('configfs is not mounted at /sys/kernel/config')
+        if GADGET.exists() or os.path.ismount(FFS):
+            raise RuntimeError('probe paths already exist; refusing to modify an existing gadget')
+        controllers = list(Path('/sys/class/udc').iterdir())
+        if len(controllers) != 1:
+            raise RuntimeError(f'expected one UDC, found {len(controllers)}')
+        self.udc = controllers[0].name
+        # Do not unbind other configfs gadgets, even with --release-g-serial.
+        for path in GADGET.parent.glob('*/UDC'):
+            if path.read_text().strip():
+                raise RuntimeError(f'UDC owned by {path.parent}; refusing to unbind it')
+        if Path('/sys/module/g_serial').exists():
+            if not self.release_serial:
+                raise RuntimeError('g_serial occupies UDC; use --release-g-serial over network SSH')
+            run('modprobe', '-r', 'g_serial')
+            self.serial_released = True
+        GADGET.mkdir()
+        self.created = True
+        # Lab-only initial Android-like identity; HU recognition needs physical testing.
+        put(GADGET / 'idVendor', '0x18d1')
+        put(GADGET / 'idProduct', '0x4ee7')
+        put(GADGET / 'bcdUSB', '0x0200')
+        text = GADGET / 'strings/0x409'
+        text.mkdir()
+        for key, value in dict(manufacturer='CarLife Linux experiment',
+                               product='H3 MD probe', serialnumber='carlife-h3-probe').items():
+            put(text / key, value)
+        config = GADGET / 'configs/c.1'
+        config.mkdir()
+        put(config / 'MaxPower', '250')
+        (GADGET / 'functions/ffs.carlife').mkdir()
+        FFS.mkdir(exist_ok=True)
+        run('mount', '-t', 'functionfs', 'carlife', str(FFS))
+        self.mounted = True
+        self.ep0 = os.open(FFS / 'ep0', os.O_RDWR)
+        self.fds.append(self.ep0)
+        os.write(self.ep0, descriptors())
+        os.write(self.ep0, strings())
+        self.rx = os.open(FFS / 'ep1', os.O_RDWR | os.O_NONBLOCK)
+        self.tx = os.open(FFS / 'ep2', os.O_RDWR | os.O_NONBLOCK)
+        self.fds.extend((self.rx, self.tx))
+        (config / 'ffs.carlife').symlink_to(GADGET / 'functions/ffs.carlife')
+        put(GADGET / 'UDC', self.udc)
+        log('gadget_bound', udc=self.udc, mode='initial')
+
+    def accessory(self):
+        put(GADGET / 'UDC', '')
+        time.sleep(0.5)
+        put(GADGET / 'idProduct', '0x2d00')
+        put(GADGET / 'UDC', self.udc)
+        log('accessory_reenumeration', vid='18d1', pid='2d00')
+
+    def close(self):
+        errors = []
+        def cleanup(call):
+            try:
+                call()
+            except Exception as error:
+                errors.append(str(error))
+        if self.created:
+            cleanup(lambda: put(GADGET / 'UDC', ''))
+        for fd in reversed(self.fds):
+            cleanup(lambda fd=fd: os.close(fd))
+        if self.created:
+            link = GADGET / 'configs/c.1/ffs.carlife'
+            if link.is_symlink():
+                cleanup(link.unlink)
+        if self.mounted:
+            cleanup(lambda: run('umount', str(FFS)))
+        if self.created:
+            for path in ('functions/ffs.carlife', 'configs/c.1', 'strings/0x409'):
+                item = GADGET / path
+                if item.exists():
+                    cleanup(item.rmdir)
+            cleanup(GADGET.rmdir)
+        if self.serial_released:
+            cleanup(lambda: run('modprobe', 'g_serial'))
+            log('usb_serial_restore', success=not errors)
+        if self.lock:
+            self.lock.close()
+        for error in errors:
+            log('cleanup_error', error=error)
+        return not errors
+
+
+def serve(gadget, duration):
+    deadline = time.monotonic() + duration
+    mode = 'initial'
+    enabled = False
+    frames = Frames()
+    pending = bytearray()
+    seen = set()
+    while time.monotonic() < deadline:
+        ready, _, _ = select.select([gadget.ep0], [], [], 0.1)
+        if ready:
+            data = os.read(gadget.ep0, 12 * 16)
+            if len(data) % 12:
+                raise RuntimeError('invalid FunctionFS event length')
+            for offset in range(0, len(data), 12):
+                event = data[offset:offset + 12]
+                kind = event[8]
+                log('functionfs_event', type=kind, mode=mode)
+                if kind == 2:
+                    enabled = True
+                elif kind in (1, 3):
+                    enabled = False
+                    frames = Frames()
+                    pending.clear()
+                elif kind == 4:
+                    request_type, request, value, index, length = struct.unpack('<BBHHH', event[:8])
+                    log('control_request', request_type=request_type, request=request,
+                        index=index, length=length)
+                    if mode == 'initial' and request_type == 0xc0 and request == 51 and value == 0 and index == 0 and length == 2:
+                        os.write(gadget.ep0, b'\x01\x00')
+                        log('aoa_protocol', version=1)
+                    elif mode == 'initial' and request_type == 0x40 and request == 52 and value == 0 and index < 6 and 0 < length <= 512:
+                        value_bytes = os.read(gadget.ep0, length)
+                        seen.add(index)
+                        log('aoa_identity_string', index=index, bytes=len(value_bytes))
+                    elif mode == 'initial' and request_type == 0x40 and request == 53 and value == 0 and index == 0 and length == 0:
+                        os.read(gadget.ep0, 0)  # Complete the control request before disconnect.
+                        log('aoa_start', received_string_indices=sorted(seen))
+                        enabled = False
+                        gadget.accessory()
+                        mode = 'accessory'
+                    else:
+                        # Opposite-direction operation stalls unsupported requests.
+                        try:
+                            if request_type & 0x80:
+                                os.read(gadget.ep0, 0)
+                            else:
+                                os.write(gadget.ep0, b'')
+                        except OSError as error:
+                            if error.errno not in (errno.EL2HLT, errno.EPIPE):
+                                raise
+        if mode != 'accessory' or not enabled:
+            continue
+        try:
+            chunk = os.read(gadget.rx, 16384)
+        except OSError as error:
+            if error.errno in (errno.EAGAIN, errno.ESHUTDOWN, errno.ENODEV):
+                chunk = b''
+            else:
+                raise
+        for channel, frame in frames.feed(chunk):
+            message = struct.unpack_from('>I', frame, 4)[0] if channel == 1 else None
+            log('carlife_rx', channel=channel, bytes=len(frame), message=message)
+            response = reply(channel, frame)
+            if response:
+                pending.extend(response)
+                if len(pending) > MAX_FRAME:
+                    raise RuntimeError('TX queue exceeded limit')
+            elif message == 0x18007:
+                log('milestone_video_init', note='HU reached video negotiation; media not implemented')
+        if pending:
+            try:
+                count = os.write(gadget.tx, pending)
+                del pending[:count]
+                log('carlife_tx', bytes=count)
+            except OSError as error:
+                if error.errno not in (errno.EAGAIN, errno.ESHUTDOWN, errno.ENODEV):
+                    raise
+    log('probe_timeout', seconds=duration, mode=mode)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--release-g-serial', action='store_true')
+    parser.add_argument('--duration', type=int, default=120)
+    args = parser.parse_args()
+    if os.geteuid() != 0:
+        parser.error('run with sudo, using network SSH')
+    if not 1 <= args.duration <= 600:
+        parser.error('duration must be between 1 and 600 seconds')
+    def interrupt(*_):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, interrupt)
+    gadget = Gadget(args.release_g_serial)
+    status = 0
+    try:
+        gadget.open()
+        serve(gadget, args.duration)
+    except KeyboardInterrupt:
+        log('probe_stopped')
+    except Exception as error:
+        log('probe_error', error=str(error))
+        status = 1
+    finally:
+        if not gadget.close():
+            status = 1
+    return status
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

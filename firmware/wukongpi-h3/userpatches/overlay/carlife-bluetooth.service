@@ -1,0 +1,18 @@
+[Unit]
+Description=CarLife H3 RTL8761BTV UART Bluetooth transport
+After=systemd-udev-trigger.service
+Before=bluetooth.service
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/carlife-bluetooth
+ExecStart=/usr/local/sbin/carlife-bluetooth
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=5
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

@@ -2,7 +2,10 @@
 
 首版用于验证 512MB 悟空派 H3 Zero 的 TF 启动、有线网络、XR819 Wi-Fi、USB Host 和 USB Device/UDC。按用户确认的 Orange Pi Zero 兼容性使用 `BOARD=orangepizero`；不是 Zero 2/3 的 H616/H618 镜像。
 
-基于 Armbian + Debian 13 Trixie Minimal，无桌面，NetworkManager 管理网络，SSH 开启，默认 USB 串口保留。包含开发依赖及 `carlife-board-check`。**尚未包含 Linux CarLife/CarPlay 桥接程序，也不承诺真机启动已验证。**
+基于 Armbian + Debian 13 Trixie Minimal，无桌面，NetworkManager 管理网络，SSH 开启，默认 USB 串口保留。包含开发依赖及 `carlife-board-check`。512MB 悟空派已实测启动、XR819 连接路由器、USB gadget 高速枚举；外接 RTL8761BTV 已实测扫描。**尚未包含可用的 Linux CarLife/CarPlay 桥接程序。**
+
+已焊接蓝牙的现有板子无需重刷，使用 [蓝牙开机初始化](BLUETOOTH.md)。
+Linux 初始 AOA/CarLife 握手实验见 [Linux 实验说明](../../linux/README.md)，待真车验证。
 
 ## 构建
 

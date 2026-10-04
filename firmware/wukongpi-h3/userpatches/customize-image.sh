@@ -2,6 +2,10 @@
 set -euo pipefail
 [[ "$3" == orangepizero ]] || { echo 'Unexpected board' >&2; exit 1; }
 install -m 0755 /tmp/overlay/carlife-board-check /usr/local/sbin/carlife-board-check
+install -m 0755 /tmp/overlay/carlife-bluetooth /usr/local/sbin/carlife-bluetooth
+install -m 0644 /tmp/overlay/carlife-bluetooth.service /etc/systemd/system/carlife-bluetooth.service
+# Opt-in: ordinary boards have neither this soldered radio nor its attach tool.
+systemctl disable carlife-bluetooth.service
 install -m 0644 /tmp/overlay/carlife-firmware-info /etc/carlife-firmware-info
 mkdir -p /etc/NetworkManager/conf.d /etc/systemd/journald.conf.d
 cat > /etc/NetworkManager/conf.d/90-carlife-wifi.conf <<'EOF'

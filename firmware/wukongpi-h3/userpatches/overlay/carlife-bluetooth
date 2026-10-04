@@ -1,0 +1,19 @@
+#!/bin/bash
+set -euo pipefail
+[[ -r /etc/default/carlife-bluetooth ]] && source /etc/default/carlife-bluetooth
+port=${BT_UART:-/dev/ttyS2}
+[[ "$port" =~ ^/dev/ttyS[0-9]+$ ]] || { echo 'Invalid BT_UART' >&2; exit 1; }
+[[ -x /usr/local/sbin/rtk_hciattach ]] || { echo 'Missing rtk_hciattach; run setup-bluetooth.sh' >&2; exit 1; }
+for name in rtl8761b_fw rtl8761b_config; do
+    [[ -s /lib/firmware/rtlbt/$name ]] || { echo "Missing $name" >&2; exit 1; }
+done
+for ((attempt=0; attempt<40; attempt++)); do
+    [[ -c "$port" ]] && break
+    sleep 0.2
+done
+[[ -c "$port" ]] || { echo "Missing $port: enable uart2 overlay and reboot" >&2; exit 1; }
+# Prevent accidentally attaching the BT transport to the console or another UART.
+device=$(readlink -f "/sys/class/tty/${port##*/}/device")
+[[ "$device" == *1c28800* ]] || { echo "$port is not H3 UART2: $device" >&2; exit 1; }
+modprobe hci_uart
+exec /usr/local/sbin/rtk_hciattach -n -s 115200 "$port" rtk_h5

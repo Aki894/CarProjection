@@ -59,6 +59,8 @@ if [[ -d /sys/class/bluetooth ]]; then
     find /sys/class/bluetooth -mindepth 1 -maxdepth 1 -printf '%f\n'
 fi
 run systemctl is-active bluetooth.service
+run systemctl is-active carlife-bluetooth.service
+run pgrep -a -x rtk_hciattach
 run bluetoothctl --timeout 5 list
 section 'Recent kernel messages'
 run dmesg --level=err,warn

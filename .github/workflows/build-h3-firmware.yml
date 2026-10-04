@@ -24,6 +24,9 @@ jobs:
           bash -n firmware/wukongpi-h3/userpatches/config-carlife-h3.conf
           bash -n firmware/wukongpi-h3/userpatches/extensions/carlife-h3-tools.sh
           bash -n firmware/wukongpi-h3/userpatches/overlay/carlife-board-check
+          bash -n firmware/wukongpi-h3/userpatches/overlay/carlife-bluetooth
+          bash -n firmware/wukongpi-h3/setup-bluetooth.sh
+          python3 -m unittest discover -s linux -v
       - name: Check runner resources
         run: |
           # Disposable hosted runner only: firmware needs the disk occupied by SDKs.
