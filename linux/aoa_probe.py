@@ -10,16 +10,19 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import queue
 import select
 import signal
 import struct
 import subprocess
 import tempfile
+import threading
 import time
 
 GADGET = Path('/sys/kernel/config/usb_gadget/carlife-probe')
 FFS = Path('/run/carlife-ffs')
 MAX_FRAME = 1024 * 1024
+LOG_FILE = None
 
 
 def descriptors():
@@ -96,8 +99,18 @@ def reply(channel, frame):
 
 
 def log(event, **values):
-    print(json.dumps(dict(time=time.strftime('%Y-%m-%dT%H:%M:%S%z'),
-                          event=event, **values), ensure_ascii=False), flush=True)
+    line = json.dumps(dict(time=time.strftime('%Y-%m-%dT%H:%M:%S%z'),
+                           event=event, **values), ensure_ascii=False)
+    if LOG_FILE:
+        LOG_FILE.write(line + '\n')
+        LOG_FILE.flush()
+        os.fsync(LOG_FILE.fileno())
+    try:
+        print(line, flush=True)
+    except OSError as error:
+        if error.errno not in (errno.EPIPE, errno.EIO):
+            raise
+        # Direct file logging continues when the SSH stdout pipe/terminal disappears.
 
 
 def run(*args, timeout=15, check=True):
@@ -172,6 +185,7 @@ class Gadget:
         self.lock = None
         self.stage = 'not_started'
         self.getty_was_active = False
+        self.bulk = None
 
     def progress(self, stage):
         self.stage = stage
@@ -250,9 +264,12 @@ class Gadget:
         log('gadget_bound', udc=self.udc, mode='initial')
 
     def accessory(self):
+        log('usb_transition', stage='unbind_initial')
         put(GADGET / 'UDC', '')
         time.sleep(0.5)
+        log('usb_transition', stage='set_accessory_identity')
         put(GADGET / 'idProduct', '0x2d00')
+        log('usb_transition', stage='bind_accessory')
         put(GADGET / 'UDC', self.udc)
         log('accessory_reenumeration', vid='18d1', pid='2d00')
 
@@ -261,10 +278,23 @@ class Gadget:
         def cleanup(call):
             try:
                 call()
+            except TimeoutError:
+                raise  # Whole-cleanup alarm: stop rather than trying more USB operations.
             except Exception as error:
                 errors.append(str(error))
+        if self.bulk:
+            self.bulk.stop.set()
+            self.bulk.enabled.set()
         if self.created:
+            log('cleanup_stage', stage='unbind_udc')
             cleanup(lambda: put(GADGET / 'UDC', ''))
+            if errors:
+                log('cleanup_error', error=errors[-1], note='leaving gadget and descriptors intact; do not restart probe')
+                return False
+        if self.bulk and not self.bulk.join():
+            log('cleanup_error', error='bulk worker still in kernel IO after unbind; leaving descriptors intact; do not restart probe')
+            return False
+        log('cleanup_stage', stage='close_endpoints')
         for fd in reversed(self.fds):
             cleanup(lambda fd=fd: os.close(fd))
         if self.created:
@@ -291,19 +321,93 @@ class Gadget:
         return not errors
 
 
-def serve(gadget, duration):
+class BulkIO:
+    """Synchronous FunctionFS IO may block despite O_NONBLOCK.
+
+    Keep it off the ep0/control loop. Unbind before joining/closing endpoints.
+    This isolates userspace waits; it cannot repair a UDC/kernel lockup.
+    """
+    def __init__(self, rx, tx):
+        self.rx, self.tx = rx, tx
+        self.stop = threading.Event()
+        self.enabled = threading.Event()
+        self.received = queue.Queue(maxsize=16)
+        self.outgoing = queue.Queue(maxsize=16)
+        self.errors = queue.Queue(maxsize=2)
+        self.threads = [threading.Thread(target=self.reader, daemon=True, name='carlife-rx'),
+                        threading.Thread(target=self.writer, daemon=True, name='carlife-tx')]
+        for thread in self.threads:
+            thread.start()
+
+    def reader(self):
+        while not self.stop.is_set():
+            if not self.enabled.wait(0.1) or self.stop.is_set():
+                continue
+            try:
+                data = os.read(self.rx, 16384)
+                if data:
+                    while not self.stop.is_set():
+                        try:
+                            self.received.put(data, timeout=0.1)
+                            break
+                        except queue.Full:
+                            pass
+                else:
+                    self.stop.wait(0.1)
+            except OSError as error:
+                if error.errno in (errno.EAGAIN, errno.ESHUTDOWN, errno.ENODEV, errno.EINTR):
+                    self.stop.wait(0.1)
+                else:
+                    self.errors.put(error)
+                    return
+
+    def writer(self):
+        while not self.stop.is_set():
+            try:
+                data = self.outgoing.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            while data and not self.stop.is_set():
+                if not self.enabled.wait(0.1) or self.stop.is_set():
+                    continue
+                try:
+                    count = os.write(self.tx, data)
+                    if count <= 0:
+                        raise OSError(errno.EIO, 'zero-length bulk write')
+                    data = data[count:]
+                    log('carlife_tx', bytes=count)
+                except OSError as error:
+                    if error.errno in (errno.EAGAIN, errno.EINTR):
+                        self.stop.wait(0.1)
+                    else:
+                        self.errors.put(error)
+                        return
+
+    def join(self):
+        deadline = time.monotonic() + 2
+        for thread in self.threads:
+            thread.join(timeout=max(0, deadline - time.monotonic()))
+        return not any(thread.is_alive() for thread in self.threads)
+
+
+def serve(gadget, duration, phase='bind'):
     deadline = time.monotonic() + duration
     mode = 'initial'
     enabled = False
+    accessory_enabled = False
+    suspended = False
     frames = Frames()
-    pending = bytearray()
     seen = set()
     rx_bytes = 0
     rx_frames = 0
-    rx_status = None
+    last_heartbeat = -float('inf')
     event_names = {0: 'bind', 1: 'unbind', 2: 'enable', 3: 'disable',
                    4: 'setup', 5: 'suspend', 6: 'resume'}
-    while time.monotonic() < deadline:
+    while (now := time.monotonic()) < deadline:
+        if now - last_heartbeat >= 5:
+            log('probe_alive', phase=phase, mode=mode, enabled=enabled,
+                rx_bytes=rx_bytes, rx_frames=rx_frames)
+            last_heartbeat = now
         ready, _, _ = select.select([gadget.ep0], [], [], 0.1)
         if ready:
             data = os.read(gadget.ep0, 12 * 16)
@@ -318,22 +422,35 @@ def serve(gadget, duration):
                         rx_frames=rx_frames, buffered_bytes=len(frames.buffer))
                 if kind == 2:
                     enabled = True
+                    suspended = False
+                    if mode == 'accessory':
+                        accessory_enabled = True
                 elif kind in (1, 3):
                     enabled = False
                     frames = Frames()
-                    pending.clear()
+                    if gadget.bulk:
+                        gadget.bulk.enabled.clear()
+                    if mode == 'accessory' and accessory_enabled:
+                        log('host_session_ended', note='probe exits after accessory disable; reconnect starts a new run')
+                        return
+                elif kind == 5:
+                    suspended = True
+                    if gadget.bulk:
+                        gadget.bulk.enabled.clear()
+                elif kind == 6:
+                    suspended = False
                 elif kind == 4:
                     request_type, request, value, index, length = struct.unpack('<BBHHH', event[:8])
                     log('control_request', request_type=request_type, request=request,
                         index=index, length=length)
-                    if mode == 'initial' and request_type == 0xc0 and request == 51 and value == 0 and index == 0 and length == 2:
+                    if phase != 'bind' and mode == 'initial' and request_type == 0xc0 and request == 51 and value == 0 and index == 0 and length == 2:
                         os.write(gadget.ep0, b'\x01\x00')
                         log('aoa_protocol', version=1)
-                    elif mode == 'initial' and request_type == 0x40 and request == 52 and value == 0 and index < 6 and 0 < length <= 512:
+                    elif phase != 'bind' and mode == 'initial' and request_type == 0x40 and request == 52 and value == 0 and index < 6 and 0 < length <= 256:
                         value_bytes = os.read(gadget.ep0, length)
                         seen.add(index)
                         log('aoa_identity_string', index=index, bytes=len(value_bytes))
-                    elif mode == 'initial' and request_type == 0x40 and request == 53 and value == 0 and index == 0 and length == 0:
+                    elif phase != 'bind' and mode == 'initial' and request_type == 0x40 and request == 53 and value == 0 and index == 0 and length == 0:
                         os.read(gadget.ep0, 0)  # Complete the control request before disconnect.
                         log('aoa_start', received_string_indices=sorted(seen))
                         enabled = False
@@ -349,20 +466,18 @@ def serve(gadget, duration):
                         except OSError as error:
                             if error.errno not in (errno.EL2HLT, errno.EPIPE):
                                 raise
-        if mode != 'accessory' or not enabled:
+        if phase != 'session' or mode != 'accessory' or not enabled or suspended:
             continue
+        if gadget.bulk is None:
+            log('bulk_workers_start')
+            gadget.bulk = BulkIO(gadget.rx, gadget.tx)
+        gadget.bulk.enabled.set()
+        if not gadget.bulk.errors.empty():
+            raise gadget.bulk.errors.get_nowait()
         try:
-            chunk = os.read(gadget.rx, 16384)
-            status = 'data' if chunk else 'empty_read'
-        except OSError as error:
-            if error.errno in (errno.EAGAIN, errno.ESHUTDOWN, errno.ENODEV):
-                chunk = b''
-                status = errno.errorcode[error.errno]
-            else:
-                raise
-        if status != rx_status:
-            log('bulk_rx_state', state=status, previous=rx_status, rx_bytes=rx_bytes)
-            rx_status = status
+            chunk = gadget.bulk.received.get_nowait()
+        except queue.Empty:
+            chunk = b''
         if chunk:
             rx_bytes += len(chunk)
             if rx_bytes == len(chunk):
@@ -373,39 +488,41 @@ def serve(gadget, duration):
             log('carlife_rx', channel=channel, bytes=len(frame), message=message)
             response = reply(channel, frame)
             if response:
-                pending.extend(response)
-                if len(pending) > MAX_FRAME:
+                try:
+                    gadget.bulk.outgoing.put_nowait(response)
+                except queue.Full:
                     raise RuntimeError('TX queue exceeded limit')
+                log('carlife_tx_queued', bytes=len(response))
             elif message == 0x18007:
                 log('milestone_video_init', note='HU reached video negotiation; media not implemented')
-        if pending:
-            try:
-                count = os.write(gadget.tx, pending)
-                del pending[:count]
-                log('carlife_tx', bytes=count)
-            except OSError as error:
-                if error.errno not in (errno.EAGAIN, errno.ESHUTDOWN, errno.ENODEV):
-                    raise
     log('probe_timeout', seconds=duration, mode=mode, rx_bytes=rx_bytes,
         rx_frames=rx_frames, buffered_bytes=len(frames.buffer))
 
 
 def main():
+    global LOG_FILE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--release-g-serial', action='store_true')
     parser.add_argument('--duration', type=int, default=120)
+    parser.add_argument('--phase', choices=('bind', 'aoa', 'session'), default='bind',
+                        help='bind: enumeration only (default); aoa: switch only; session: experimental bulk IO')
+    parser.add_argument('--log-file', help='append and fsync JSON logs directly to this file')
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error('run with sudo, using network SSH')
     if not 1 <= args.duration <= 600:
         parser.error('duration must be between 1 and 600 seconds')
+    if args.log_file:
+        fd = os.open(args.log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+        LOG_FILE = os.fdopen(fd, 'a')
     def interrupt(*_):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, interrupt)
+    signal.signal(signal.SIGHUP, signal.SIG_IGN if LOG_FILE else interrupt)
     gadget = Gadget(args.release_g_serial)
-    log('probe_start', duration=args.duration, release_g_serial=args.release_g_serial)
+    log('probe_start', duration=args.duration, phase=args.phase, release_g_serial=args.release_g_serial)
     def startup_timeout(*_):
-        raise TimeoutError(f'USB gadget startup timed out at {gadget.stage}')
+        raise TimeoutError(f'USB probe timed out at {gadget.stage}')
     signal.signal(signal.SIGALRM, startup_timeout)
     status = 0
     try:
@@ -413,7 +530,9 @@ def main():
         gadget.open()
         signal.setitimer(signal.ITIMER_REAL, 0)
         log('waiting_for_host', note='connect OTG data port to CarLife HU or a test USB host')
-        serve(gadget, args.duration)
+        gadget.stage = 'serve_control_loop'
+        signal.setitimer(signal.ITIMER_REAL, args.duration + 5)
+        serve(gadget, args.duration, args.phase)
     except KeyboardInterrupt:
         log('probe_stopped')
     except Exception as error:
@@ -421,8 +540,19 @@ def main():
         status = 1
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
-        if not gadget.close():
+        gadget.stage = 'cleanup'
+        signal.setitimer(signal.ITIMER_REAL, 20)
+        try:
+            if not gadget.close():
+                status = 1
+        except Exception as error:
+            log('cleanup_error', error=str(error), note='do not restart until old gadget and processes are checked')
             status = 1
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            if LOG_FILE:
+                LOG_FILE.close()
+                LOG_FILE = None
     return status
 
 

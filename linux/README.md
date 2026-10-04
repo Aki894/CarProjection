@@ -1,7 +1,7 @@
 # Linux CarLife MD：第一轮 USB 实验
 
 `aoa_probe.py` 使用内核已有 configfs/FunctionFS，不依赖 Android 的 USB Accessory API。
-实现 AOA 1.0 的 GET_PROTOCOL(51)、SEND_STRING(52)、START(53)，随后使用
+可选阶段实现 AOA 1.0 的 GET_PROTOCOL(51)、SEND_STRING(52)、START(53)，随后使用
 18d1:2d00 重新枚举，并用 CarLife USB 外层封包回应 HU_PROTOCOL_VERSION / HU_INFO。
 封包及 DeviceInfo 字段参照当前安卓端 Utils.java 和 proto；不复制 Android 消息处理线程。
 
@@ -13,16 +13,28 @@
 
 ## 桌面或真车执行
 
+**2026-10-05 更新：出现过 SSH 失联/疑似整板失去响应，默认改为只枚举。**
+先按 [H3 故障排查](H3_DIAGNOSTICS.md) 保存现场并分阶段测试。
+FunctionFS 同步 bulk read/write 即使使用 O_NONBLOCK 也可能等待 USB 完成，
+旧版在主循环直接调用它们，会停住 ep0 处理与软件期限。新版 session 阶段
+使用两个有界队列和独立收发线程；主循环每 5 秒输出 `probe_alive`。
+它只能隔离用户态等待，无法修复内核/UDC 锁死。清理先解绑 UDC，再等待线程，
+确认退出后才关闭端点；解绑出错或线程未结束时拒绝继续恢复其他 USB 驱动。
+
 先完成 `firmware/wukongpi-h3/BLUETOOTH.md` 的开机测试。USB 实验本身不依赖蓝牙。
 **必须通过 Wi-Fi/网线 SSH 操作，不可依赖 USB 串口保持连接。**
 
 ```bash
 cd ~/CarProjection
 sudo -v
-sudo python3 -u linux/aoa_probe.py --release-g-serial --duration 120 2>&1 \
+sudo python3 -u linux/aoa_probe.py --release-g-serial --phase bind --duration 30 2>&1 \
   | tee ~/carlife-aoa-probe.log
 ```
 
+阶段：`bind` 只测试初始 USB 枚举（默认，不应期待 CarLife 连接成功）；
+`aoa` 加上 AOA 切换但不读写 bulk；`session` 才进行实验 CarLife 收发。
+只有前阶段系统稳定且清理成功，才进入后阶段。三者均绑定 FunctionFS/UDC，
+任何阶段都不能保证避开底层内核/硬件异常。
 启动后，把板子的 USB OTG 数据口接车机 CarLife 数据口，进入车机 CarLife 页面。
 普通手机不会自动作为 AOA 主机发起本实验握手。桌面连接电脑可以先测试 USB 枚举，
 安装 CarLife 车机端、已验证有线连接的手机可以作为 HU 测试对端；选择有线模式，
@@ -31,7 +43,8 @@ sudo python3 -u linux/aoa_probe.py --release-g-serial --duration 120 2>&1 \
 Device/MD 角色；车机承担 USB Host/HU 角色。
 即使没有插 USB，程序也应立即打印 `probe_start`、启动阶段和 `gadget_bound`。
 如果日志为空，先确认 sudo 验证完成，并使用上面的 `-u` 和 `2>&1` 捕获启动错误。
-启动阶段增加 30 秒计时器；可被信号中断的阻塞会报告最后阶段并尝试清理。
+启动阶段有 30 秒计时器，运行有 duration+5 秒后备计时器，清理有 20 秒计时器；
+可被信号中断的阻塞会报告最后阶段并尝试清理。
 内核不可中断等待不能靠 Python 计时器强制终止，应结合进程状态/内核日志诊断。
 如 `g_serial` 正被打开的 ttyGS0 占用，程序会拒绝卸载；请关闭该 USB 串口连接，
 用网络 SSH 重试。程序只操作自己的 gadget，拒绝解绑其他 configfs gadget。
@@ -54,13 +67,13 @@ Ctrl+C、SIGTERM、异常及 120 秒到时都会尝试解绑/删除本程序 gad
 | aoa_protocol / aoa_identity_string | 车机正在尝试 AOA |
 | aoa_start / accessory_reenumeration | 请求切换，板子已重新绑定 accessory 身份 |
 | functionfs_event type=2, mode=accessory | 新配置被主机启用 |
-| carlife_rx / carlife_tx | 收到 CarLife 消息 / 完成初始回复写入 |
+| carlife_rx / carlife_tx_queued / carlife_tx | 完整接收 / 回复排队 / 实际写入完成 |
 | milestone_video_init | 车机推进到视频参数协商，下一阶段开发入口 |
 
 事件日志同时显示名称：type=5 是 suspend，type=3 是 disable，不能仅凭它们断定
 物理线缆脱落。`bulk_first_rx` 表示收到了原始字节，`carlife_rx` 表示解析出完整帧。
 `usb_session_state` 和 `probe_timeout` 汇总接收字节、完整帧及尚未解析字节数；
-`bulk_rx_state` 仅在端点读状态变化时记录，EAGAIN 表示本次暂无数据。
+`probe_alive` 即使接收线程未完成读也应继续输出；`bulk_workers_start` 是开始 bulk 的边界。
 若 accessory ENABLE 后没有完整帧，保留结束日志及手机车机端提示，先区分
 主机未发数据、端点未交付数据和分片尚未完整，再继续定位；不记录负载内容。
 
@@ -76,7 +89,8 @@ python3 -m unittest discover -s linux -v
 python3 linux/aoa_probe.py --help
 ```
 
-测试覆盖 FS/HS 二进制描述符、分片/合并 USB 读、CarLife 初始回复和恶意长度拒绝。
+测试覆盖 FS/HS 二进制描述符、分片/合并 USB 读、CarLife 初始回复、恶意长度拒绝、
+仅枚举阶段的隔离、阻塞读不阻塞主循环及分段写入。
 它们不能代替真实 UDC、USB 主机和车机测试。接下来的里程碑是完整 CarLife 会话/
 心跳和测试视频，然后接 CarPlay 接收端、音频和输入。
 
