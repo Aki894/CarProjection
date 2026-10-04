@@ -18,11 +18,21 @@
 
 ```bash
 cd ~/CarProjection
-sudo python3 linux/aoa_probe.py --release-g-serial --duration 120 \
+sudo -v
+sudo python3 -u linux/aoa_probe.py --release-g-serial --duration 120 2>&1 \
   | tee ~/carlife-aoa-probe.log
 ```
 
 启动后，把板子的 USB OTG 数据口接车机 CarLife 数据口，进入车机 CarLife 页面。
+普通手机不会自动作为 AOA 主机发起本实验握手。桌面连接电脑可以先测试 USB 枚举，
+安装 CarLife 车机端、已验证有线连接的手机可以作为 HU 测试对端；选择有线模式，
+并确保该手机承担 USB Host 角色。它与普通手机连接的情况不同。
+电脑需另有 AOA 主机程序才会发送协议请求。板子此时承担原先 Android 手机的 USB
+Device/MD 角色；车机承担 USB Host/HU 角色。
+即使没有插 USB，程序也应立即打印 `probe_start`、启动阶段和 `gadget_bound`。
+如果日志为空，先确认 sudo 验证完成，并使用上面的 `-u` 和 `2>&1` 捕获启动错误。
+启动阶段增加 30 秒计时器；可被信号中断的阻塞会报告最后阶段并尝试清理。
+内核不可中断等待不能靠 Python 计时器强制终止，应结合进程状态/内核日志诊断。
 如 `g_serial` 正被打开的 ttyGS0 占用，程序会拒绝卸载；请关闭该 USB 串口连接，
 用网络 SSH 重试。程序只操作自己的 gadget，拒绝解绑其他 configfs gadget。
 Ctrl+C、SIGTERM、异常及 120 秒到时都会尝试解绑/删除本程序 gadget，并恢复原先

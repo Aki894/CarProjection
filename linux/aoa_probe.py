@@ -100,6 +100,7 @@ def log(event, **values):
 
 
 def run(*args):
+    log('system_command', command=list(args))
     subprocess.run(args, check=True, timeout=15)
 
 
@@ -116,8 +117,14 @@ class Gadget:
         self.fds = []
         self.udc = None
         self.lock = None
+        self.stage = 'not_started'
+
+    def progress(self, stage):
+        self.stage = stage
+        log('startup_stage', stage=stage)
 
     def open(self):
+        self.progress('acquire_lock')
         self.lock = open('/run/carlife-gadget.lock', 'w')
         fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         run('modprobe', 'libcomposite')
@@ -130,6 +137,7 @@ class Gadget:
         if len(controllers) != 1:
             raise RuntimeError(f'expected one UDC, found {len(controllers)}')
         self.udc = controllers[0].name
+        log('udc_found', udc=self.udc)
         # Do not unbind other configfs gadgets, even with --release-g-serial.
         for path in GADGET.parent.glob('*/UDC'):
             if path.read_text().strip():
@@ -139,6 +147,8 @@ class Gadget:
                 raise RuntimeError('g_serial occupies UDC; use --release-g-serial over network SSH')
             run('modprobe', '-r', 'g_serial')
             self.serial_released = True
+            log('usb_serial_released')
+        self.progress('create_gadget')
         GADGET.mkdir()
         self.created = True
         # Lab-only initial Android-like identity; HU recognition needs physical testing.
@@ -157,14 +167,19 @@ class Gadget:
         FFS.mkdir(exist_ok=True)
         run('mount', '-t', 'functionfs', 'carlife', str(FFS))
         self.mounted = True
+        self.progress('open_ep0')
         self.ep0 = os.open(FFS / 'ep0', os.O_RDWR)
         self.fds.append(self.ep0)
+        self.progress('write_descriptors')
         os.write(self.ep0, descriptors())
+        self.progress('write_strings')
         os.write(self.ep0, strings())
+        self.progress('open_bulk_endpoints')
         self.rx = os.open(FFS / 'ep1', os.O_RDWR | os.O_NONBLOCK)
         self.tx = os.open(FFS / 'ep2', os.O_RDWR | os.O_NONBLOCK)
         self.fds.extend((self.rx, self.tx))
         (config / 'ffs.carlife').symlink_to(GADGET / 'functions/ffs.carlife')
+        self.progress('bind_udc')
         put(GADGET / 'UDC', self.udc)
         log('gadget_bound', udc=self.udc, mode='initial')
 
@@ -301,9 +316,16 @@ def main():
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, interrupt)
     gadget = Gadget(args.release_g_serial)
+    log('probe_start', duration=args.duration, release_g_serial=args.release_g_serial)
+    def startup_timeout(*_):
+        raise TimeoutError(f'USB gadget startup timed out at {gadget.stage}')
+    signal.signal(signal.SIGALRM, startup_timeout)
     status = 0
     try:
+        signal.setitimer(signal.ITIMER_REAL, 30)
         gadget.open()
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        log('waiting_for_host', note='connect OTG data port to CarLife HU or a test USB host')
         serve(gadget, args.duration)
     except KeyboardInterrupt:
         log('probe_stopped')
@@ -311,6 +333,7 @@ def main():
         log('probe_error', error=str(error))
         status = 1
     finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
         if not gadget.close():
             status = 1
     return status
