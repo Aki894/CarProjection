@@ -19,11 +19,13 @@ git clone https://github.com/Aki894/CarProjection.git ~/CarProjection
 sudo bash ~/CarProjection/firmware/wukongpi-h3/setup-bluetooth.sh
 sudo systemctl status carlife-bluetooth --no-pager
 bluetoothctl list
-sudo reboot
+sudo poweroff
 ```
 
-重连 SSH 后运行 `bluetoothctl list`，并在 `bluetoothctl` 中执行 `scan on`，
-观察附近设备，再 `scan off`、`quit`。这是自动初始化的验收标准。
+关机后断开所有可能供电的 USB/外部电源，再重新上电（冷启动）。
+重连 SSH 后运行 `timeout 8s bluetoothctl list`，并在 `bluetoothctl` 中执行 `scan on`，
+观察附近设备，再 `scan off`、`quit`。这是冷启动自动初始化的验收标准。
+普通 reboot 不一定会让持续供电的蓝牙模块复位。
 
 服务使用 `/usr/local/sbin/rtk_hciattach -n -s 115200 /dev/ttyS2 rtk_h5`，
 异常退出后重启，120 秒内最多启动三次，避免接线/供电故障时无限重试。
@@ -40,6 +42,23 @@ sudo btmgmt info
 
 关闭/回退：`sudo systemctl disable --now carlife-bluetooth.service`；
 之后可恢复手动 attach。不要同时启动两个 attach 实例。
+
+## H5 同步超时与 bluetoothctl 等待
+
+连续 `OP_H5_SYNC Transmission timeout` 和 `Retransmission exhausts` 表示
+初始化工具没有收到 UART H5 同步回复；串口文件存在不代表控制器已经注册。
+此前手动扫描成功、热重启后失败时，模块保留运行状态/非初始波特率是待验证的原因，
+也应排查电源和流控。先做完整断电测试，不循环重启服务或猜测波特率。
+
+旧版在 Type=simple 主进程内才加载 hci_uart，与 BlueZ 启动存在时序问题。
+BlueZ 单元有 `/sys/class/bluetooth` 存在条件，驱动未加载时可能跳过启动。
+修订版增加同步 ExecStartPre 加载和 Wants=bluetooth.service，安装时清除
+start-limit 失败状态。该修改修复加载顺序，不保证未复位的模块恢复初始状态。
+
+如果冷启动成功、热重启仍失败，下一步将模块 BT_DIS_N 接可控 GPIO，按实际接线
+实现初始化前复位。不要在不知道 38 脚是否直连 3.3V 时直接把 GPIO 拉低。
+没有硬件复位线路前，自动重启仅作有限重试，不能保证恢复已运行的控制器。
+回退到手动 attach 同样可能需要先断电复位。
 
 ## 新板子缺少工具或固件时
 

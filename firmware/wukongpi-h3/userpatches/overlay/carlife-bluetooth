@@ -1,5 +1,11 @@
 #!/bin/bash
 set -euo pipefail
+# Complete module loading before BlueZ evaluates its sysfs startup condition.
+if [[ ${1:-} == prepare ]]; then
+    modprobe hci_uart
+    exit 0
+fi
+[[ $# == 0 ]] || { echo 'Usage: carlife-bluetooth [prepare]' >&2; exit 1; }
 [[ -r /etc/default/carlife-bluetooth ]] && source /etc/default/carlife-bluetooth
 port=${BT_UART:-/dev/ttyS2}
 [[ "$port" =~ ^/dev/ttyS[0-9]+$ ]] || { echo 'Invalid BT_UART' >&2; exit 1; }
@@ -16,4 +22,5 @@ done
 device=$(readlink -f "/sys/class/tty/${port##*/}/device")
 [[ "$device" == *1c28800* ]] || { echo "$port is not H3 UART2: $device" >&2; exit 1; }
 modprobe hci_uart
+echo "Attaching RTL8761BTV on $port at initial speed 115200 (requires reset/cold state)"
 exec /usr/local/sbin/rtk_hciattach -n -s 115200 "$port" rtk_h5

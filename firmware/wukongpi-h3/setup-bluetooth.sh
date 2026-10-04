@@ -16,7 +16,9 @@ install -m 0644 "$root/userpatches/overlay/carlife-bluetooth.service" /etc/syste
 [[ -e /etc/default/carlife-bluetooth ]] || printf 'BT_UART=/dev/ttyS2\n' > /etc/default/carlife-bluetooth
 systemctl daemon-reload
 systemctl enable carlife-bluetooth.service bluetooth.service
+systemctl reset-failed carlife-bluetooth.service
 systemctl restart carlife-bluetooth.service
 systemctl start bluetooth.service
 echo 'Transport started. Check: bluetoothctl list; journalctl -u carlife-bluetooth -b --no-pager'
-echo 'Then reboot and repeat the discovery test to validate automatic startup.'
+echo 'First boot test: poweroff, disconnect ALL power sources (including USB), then reconnect.'
+echo 'Warm reboot/attach restart may need a hardware BT_DIS_N reset; no reset GPIO is assumed.'
