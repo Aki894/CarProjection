@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import select
+import signal
 import subprocess
 import time
 
@@ -26,6 +27,9 @@ def main():
         parser.error('run with sudo to read kernel messages')
     if not 1 <= args.duration <= 600:
         parser.error('duration must be 1..600 seconds')
+    def interrupt(*_args):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, interrupt)
     fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     kernel = None
     with os.fdopen(fd, 'w') as output:

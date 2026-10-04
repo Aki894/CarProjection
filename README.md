@@ -2,6 +2,8 @@
 
 本项目基于carlife 协议投屏，安卓10以上无需root，可反向触控，仅用作研究学习
 
+[Linux CarLife MD 移植与 H3 集中测试](linux/README.md) · [Linux 手机端项目核查](linux/LINUX_MD_RESEARCH.md)
+
 [v0.3.9 断连诊断、稳定性修复与阶段一审查](docs/v0.3.9-stability-review.md)
 
 [v0.3.8 光标刷新与响应优化](docs/v0.3.8-cursor-smoothing.md)

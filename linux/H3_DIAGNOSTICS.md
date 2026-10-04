@@ -11,7 +11,7 @@
 | 初始枚举 | 有一次主机成功发送 51/52/53，另一次只有 BIND | ENABLE 前后系统是否仍运行 |
 | AOA | 已有 accessory ENABLE，手机 HU 支持这条 AOA 路径 | 原车结果及重枚举边界日志 |
 | bulk IO | 旧主循环误依赖 O_NONBLOCK；同步调用仍可等待完成 | 新版主循环心跳与实际接收字节 |
-| CarLife | 尚无完整接收帧证据；只有两类初始回复实现 | session 阶段的 carlife_rx |
+| CarLife | 实机尚无完整接收帧证据；源码现已补齐会话及测试媒体 | session 阶段的 carlife_rx/session_stats |
 | 网络 | 之前已有 Ethernet DMA reset 失败及 XR819 missed interrupt | 本次内核日志、IRQ 和网络计数 |
 | 整板状态 | SSH 失联和网口灯常亮不能证明 CPU 锁死 | 独立记录器、UART 控制台与外部 ping |
 | 供电/硬件 | 未测电压、未核对实际 PCB 的 USB 供电路径 | 固定可靠供电、单变量线缆/主机对照 |
@@ -89,8 +89,9 @@ sudo python3 -u linux/aoa_probe.py --release-g-serial --phase session --duration
   --log-file "$HOME/h3-session-$carlife_stamp.jsonl"
 ```
 
-目标是 bulk_first_rx、carlife_rx、carlife_tx 或 milestone_video_init。视频、媒体、
-认证、心跳和输入仍未实现，原车页面仍可能超时断开；不要期待本轮已可用 CarPlay。
+目标是 bulk_first_rx、carlife_rx、session_started、carlife_tx 和 session_stats。
+现在 session 包含匹配尺寸的测试画面、短提示音、心跳和输入事件，见 README。
+CarPlay 接收与应用业务仍未接入，不要期待这轮已可用 CarPlay。
 原车与手机 HU 的结果分别记录，以区分主机差异。任何阶段整板失联就停在该阶段，
 恢复后收集日志，不连续重复触发。
 

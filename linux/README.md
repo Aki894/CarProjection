@@ -1,13 +1,74 @@
-# Linux CarLife MD：第一轮 USB 实验
+# Linux CarLife MD：会话移植与集中测试
 
 `aoa_probe.py` 使用内核已有 configfs/FunctionFS，不依赖 Android 的 USB Accessory API。
 可选阶段实现 AOA 1.0 的 GET_PROTOCOL(51)、SEND_STRING(52)、START(53)，随后使用
 18d1:2d00 重新枚举，并用 CarLife USB 外层封包回应 HU_PROTOCOL_VERSION / HU_INFO。
 封包及 DeviceInfo 字段参照当前安卓端 Utils.java 和 proto；不复制 Android 消息处理线程。
 
-**这是待真车验证的实验程序，不是已经可用的 CarPlay 盒子。** 不含视频初始化回复、
-音视频、认证、心跳、触控回传或 CarPlay 接收端。到了 VIDEO_ENCODER_INIT 会记录
-`milestone_video_init`，不宣称投屏成功；车机随后超时断开是本轮预期限制。
+2026-10-05：新增 `carlife_md.py` 完整会话测试入口，共用同一 AOA/FunctionFS 底层。
+它实现了安卓端实际使用的握手顺序、功能协商、视频尺寸/START、前台/屏幕/认证
+结果回复、视频心跳、H.264 与 PCM16 发送、输入解析及 Remote Touch 手势映射。
+`aoa_probe.py` 仍默认仅枚举；选择 `--phase session` 时也使用完整会话。
+
+## 一次准备，集中验证
+
+```bash
+git -C ~/CarProjection pull --ff-only
+sudo apt-get update
+sudo apt-get install ffmpeg
+cd ~/CarProjection
+bash linux/run-h3-test.sh
+```
+
+不要用 sudo 运行整个 bash 入口；它内部只对 USB 和记录器提权，日志目录位于
+调用用户的 `~/carlife-tests/时间戳/`。先拔 OTG 数据线，保持网络 SSH。
+脚本先运行单元测试与真实 H.264 编解码/直通自检，确认独立现场记录器 ready 后
+再启动 180 秒 CarLife 会话；看到 waiting_for_host 再接车机。每轮录像、声音和
+输入都已准备好，不需要测试到某一步才补相应代码。
+
+默认画面是按 HU 尺寸生成的动态测试图，10 fps、单线程 baseline H.264。
+启动后播放约 3 秒 440 Hz 间歇测试音，48 kHz/单声道/PCM16LE，经 TTS 通道发送。
+gain=0.03 是 PCM 振幅倍率，不等于车机听感音量百分比。测试音结束后视频/心跳
+继续，避免整场实验持续响音。触控/按键产生 `input_event`，包含原始 PAD 事件和
+与 Android 桥接一致的 knob/wheel/touch/media_key 映射；double tap 点击与
+double tap 滑动的 wheel 映射可一起验证。当前没有 Linux CarPlay 消费者或桌面 UI，
+输入记录不会凭空操控 iPhone，也不会在测试图上移动光标。
+
+可一次准备几种组合，分别运行，每轮会自动建立新日志目录：
+
+```bash
+bash linux/run-h3-test.sh --audio off
+bash linux/run-h3-test.sh --audio tts --sample-rate 16000
+bash linux/run-h3-test.sh --audio media --sample-rate 48000 --channels 2
+bash linux/run-h3-test.sh --fps 5 --gain 0.01
+```
+
+只有系统仍稳定且上一轮清理成功时再运行下一轮；曾有失联，诊断入口仍保留。
+底层 UDC/内核/供电问题无法由握手代码绕过，发生失联先保存独立记录器日志。
+
+## 自定义视频与音频源
+
+```bash
+bash linux/run-h3-test.sh --video-file /path/demo.mp4
+bash linux/run-h3-test.sh --video-file /path/matching.h264 --copy-video --fps 10
+bash linux/run-h3-test.sh --pcm-file /path/audio.pcm --audio-seconds 30
+```
+
+普通 video-file 会缩放/补边到 HU 尺寸并编码；copy-video 则只整理 Annex B/AUD 后
+直通，输入必须是 H.264，尺寸和容器帧率匹配协商参数，否则明确拒绝。
+裸 Annex B 没有容器时间戳，播放帧率按 --fps 显式声明；不依赖 ffprobe 猜测的 tbr。copy 源不
+重编码，但仍使用 FFmpeg 处理容器/位流。PCM 文件须与选定采样率/声道一致且为
+PCM16LE，测试源最多 16 MiB，循环播放至 audio-seconds 到时；不能把 WAV 头当 PCM。
+这是已有媒体源接线入口，不包含系统声音捕获、CarPlay 接收或 iPhone 连接管理。
+
+## 当前边界
+
+**这是待真车验证的 Linux MD 移植，不是已经可用的 CarPlay 盒子。** Android
+MediaProjection、Accessibility、Binder 和 UI 不能原样运行于无桌面的 H3；这里用
+Linux 媒体源和输入事件出口替代平台接口。CarPlay 接收端仍未接入，通话/麦克风/
+导航应用业务没有实现。认证仅保持安卓端 STATISTIC_INFO 后 result=true 的行为，
+不是完整密码学认证；若 HU 要求 CONTENT_ENCRYPTION，停止发送未加密媒体并记录。
+MODULE_CONTROL 与 RSA 公钥回复作诊断记录，与当前 Android 的处理范围一致。
 起始 18d1:4ee7 + vendor interface 仅为实验身份，不实现 ADB。
 若车机只识别特定 Android 初始接口，可能根本不发送 AOA 请求，日志可用于区分此情况。
 
@@ -68,7 +129,9 @@ Ctrl+C、SIGTERM、异常及 120 秒到时都会尝试解绑/删除本程序 gad
 | aoa_start / accessory_reenumeration | 请求切换，板子已重新绑定 accessory 身份 |
 | functionfs_event type=2, mode=accessory | 新配置被主机启用 |
 | carlife_rx / carlife_tx_queued / carlife_tx | 完整接收 / 回复排队 / 实际写入完成 |
-| milestone_video_init | 车机推进到视频参数协商，下一阶段开发入口 |
+| session_handshake stage=video_init_done | 已按 HU 尺寸回复初始化 |
+| session_started / session_stats | 开始媒体、发送帧数/音频包数/队列统计 |
+| input_event | 触控板、按键、触摸与映射后的原生输入事件 |
 
 事件日志同时显示名称：type=5 是 suspend，type=3 是 disable，不能仅凭它们断定
 物理线缆脱落。`bulk_first_rx` 表示收到了原始字节，`carlife_rx` 表示解析出完整帧。
@@ -87,12 +150,14 @@ Ctrl+C、SIGTERM、异常及 120 秒到时都会尝试解绑/删除本程序 gad
 ```bash
 python3 -m unittest discover -s linux -v
 python3 linux/aoa_probe.py --help
+python3 linux/media_selftest.py
 ```
 
 测试覆盖 FS/HS 二进制描述符、分片/合并 USB 读、CarLife 初始回复、恶意长度拒绝、
 仅枚举阶段的隔离、阻塞读不阻塞主循环及分段写入。
-它们不能代替真实 UDC、USB 主机和车机测试。接下来的里程碑是完整 CarLife 会话/
-心跳和测试视频，然后接 CarPlay 接收端、音频和输入。
+它们不能代替真实 UDC、USB 主机和车机测试。完整模拟 HU 会话、23 项单元测试及
+真实 H.264 编码/直通/解码已在开发环境执行；H3 性能与 Lexus 兼容性仍待实测。
+研究结果见 [Linux MD 项目核查](LINUX_MD_RESEARCH.md)。
 
 官方协议/内核依据：
 - https://source.android.com/docs/core/interaction/accessories/aoa

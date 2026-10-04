@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Experimental Linux MD gadget: AOA 1.0 negotiation and first CarLife commands.
+"""Linux CarLife MD gadget with diagnostic stages and CarProjection session.
 
-No media, input, authentication, heartbeat or CarPlay receiver is implemented.
 Only run over Wi-Fi/Ethernet SSH: temporarily replaces USB serial if requested.
+No CarPlay receiver is included. Full session uses headless test/file sources.
 """
 import argparse
 import errno
@@ -18,6 +18,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from carlife_tx import TxQueue
 
 GADGET = Path('/sys/kernel/config/usb_gadget/carlife-probe')
 FFS = Path('/run/carlife-ffs')
@@ -332,7 +333,9 @@ class BulkIO:
         self.stop = threading.Event()
         self.enabled = threading.Event()
         self.received = queue.Queue(maxsize=16)
-        self.outgoing = queue.Queue(maxsize=16)
+        self.outgoing = TxQueue()
+        self.last_video_write = -float('inf')
+        self.write_packets = 0
         self.errors = queue.Queue(maxsize=2)
         self.threads = [threading.Thread(target=self.reader, daemon=True, name='carlife-rx'),
                         threading.Thread(target=self.writer, daemon=True, name='carlife-tx')]
@@ -367,6 +370,7 @@ class BulkIO:
                 data = self.outgoing.get(timeout=0.1)
             except queue.Empty:
                 continue
+            packet = data
             while data and not self.stop.is_set():
                 if not self.enabled.wait(0.1) or self.stop.is_set():
                     continue
@@ -375,13 +379,19 @@ class BulkIO:
                     if count <= 0:
                         raise OSError(errno.EIO, 'zero-length bulk write')
                     data = data[count:]
-                    log('carlife_tx', bytes=count)
                 except OSError as error:
                     if error.errno in (errno.EAGAIN, errno.EINTR):
                         self.stop.wait(0.1)
                     else:
                         self.errors.put(error)
                         return
+            if not data:
+                self.write_packets += 1
+                channel = struct.unpack_from('>I', packet)[0] if len(packet) >= 8 else 1
+                if channel == 2:
+                    self.last_video_write = time.monotonic()
+                if channel == 1 or self.write_packets == 1 or self.write_packets % 100 == 0:
+                    log('carlife_tx', bytes=len(packet), channel=channel, packets=self.write_packets)
 
     def join(self):
         deadline = time.monotonic() + 2
@@ -390,7 +400,7 @@ class BulkIO:
         return not any(thread.is_alive() for thread in self.threads)
 
 
-def serve(gadget, duration, phase='bind'):
+def serve(gadget, duration, phase='bind', session=None):
     deadline = time.monotonic() + duration
     mode = 'initial'
     enabled = False
@@ -408,7 +418,7 @@ def serve(gadget, duration, phase='bind'):
             log('probe_alive', phase=phase, mode=mode, enabled=enabled,
                 rx_bytes=rx_bytes, rx_frames=rx_frames)
             last_heartbeat = now
-        ready, _, _ = select.select([gadget.ep0], [], [], 0.1)
+        ready, _, _ = select.select([gadget.ep0], [], [], 0.01 if session else 0.1)
         if ready:
             data = os.read(gadget.ep0, 12 * 16)
             if len(data) % 12:
@@ -484,8 +494,11 @@ def serve(gadget, duration, phase='bind'):
                 log('bulk_first_rx', bytes=len(chunk))
         for channel, frame in frames.feed(chunk):
             rx_frames += 1
-            message = struct.unpack_from('>I', frame, 4)[0] if channel == 1 else None
+            message = struct.unpack_from('>I', frame, 4)[0] if channel in (1, 6) else None
             log('carlife_rx', channel=channel, bytes=len(frame), message=message)
+            if session:
+                session.receive(channel, frame, gadget.bulk, now)
+                continue
             response = reply(channel, frame)
             if response:
                 try:
@@ -495,23 +508,44 @@ def serve(gadget, duration, phase='bind'):
                 log('carlife_tx_queued', bytes=len(response))
             elif message == 0x18007:
                 log('milestone_video_init', note='HU reached video negotiation; media not implemented')
+        if session:
+            session.tick(gadget.bulk, now)
     log('probe_timeout', seconds=duration, mode=mode, rx_bytes=rx_bytes,
         rx_frames=rx_frames, buffered_bytes=len(frames.buffer))
 
 
-def main():
+def main(default_phase='bind'):
     global LOG_FILE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--release-g-serial', action='store_true')
     parser.add_argument('--duration', type=int, default=120)
-    parser.add_argument('--phase', choices=('bind', 'aoa', 'session'), default='bind',
-                        help='bind: enumeration only (default); aoa: switch only; session: experimental bulk IO')
+    parser.add_argument('--phase', choices=('bind', 'aoa', 'session'), default=default_phase,
+                        help='bind: enumeration only; aoa: switch only; session: full CarLife MD test')
     parser.add_argument('--log-file', help='append and fsync JSON logs directly to this file')
+    parser.add_argument('--video', choices=('pattern', 'off'), default='pattern')
+    parser.add_argument('--video-file', help='video file encoded/scaled to HU size instead of test pattern')
+    parser.add_argument('--copy-video', action='store_true', help='pass matching H.264 video-file through without encoding')
+    parser.add_argument('--fps', type=int, default=10)
+    parser.add_argument('--audio', choices=('tts', 'media', 'off'), default='tts')
+    parser.add_argument('--sample-rate', type=int, default=48000)
+    parser.add_argument('--channels', type=int, choices=(1, 2), default=1)
+    parser.add_argument('--gain', type=float, default=.03)
+    parser.add_argument('--audio-seconds', type=float, default=3)
+    parser.add_argument('--pcm-file', help='aligned PCM16LE in selected rate/channels, looped for audio test')
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error('run with sudo, using network SSH')
     if not 1 <= args.duration <= 600:
         parser.error('duration must be between 1 and 600 seconds')
+    if not 1 <= args.fps <= 60 or args.sample_rate not in (16000, 24000, 32000, 44100, 48000):
+        parser.error('invalid fps or sample rate')
+    if not 0 <= args.gain <= 1 or not 0 < args.audio_seconds <= 600:
+        parser.error('gain must be 0..1 and audio-seconds must be 0..600')
+    for path in (args.video_file, args.pcm_file):
+        if path and not Path(path).is_file():
+            parser.error(f'input is not a regular file: {path}')
+    if args.copy_video and (not args.video_file or args.video == 'off'):
+        parser.error('--copy-video requires --video-file and enabled video')
     if args.log_file:
         fd = os.open(args.log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
         LOG_FILE = os.fdopen(fd, 'a')
@@ -525,14 +559,25 @@ def main():
         raise TimeoutError(f'USB probe timed out at {gadget.stage}')
     signal.signal(signal.SIGALRM, startup_timeout)
     status = 0
+    session = None
     try:
         signal.setitimer(signal.ITIMER_REAL, 30)
+        if args.phase == 'session':
+            gadget.stage = 'media_preflight'
+            if args.video != 'off':
+                run('ffmpeg', '-hide_banner', '-loglevel', 'error', '-nostdin',
+                    '-f', 'lavfi', '-i', 'color=size=16x16:rate=1', '-frames:v', '1',
+                    '-c:v', 'libx264', '-threads', '1', '-f', 'null', '-', timeout=8)
+            from carlife_session import Session
+            session = Session(log, fps=args.fps, video=args.video != 'off', video_file=args.video_file, copy_video=args.copy_video,
+                              audio=args.audio, rate=args.sample_rate, channels=args.channels,
+                              gain=args.gain, audio_seconds=args.audio_seconds, pcm_file=args.pcm_file)
         gadget.open()
         signal.setitimer(signal.ITIMER_REAL, 0)
         log('waiting_for_host', note='connect OTG data port to CarLife HU or a test USB host')
         gadget.stage = 'serve_control_loop'
         signal.setitimer(signal.ITIMER_REAL, args.duration + 5)
-        serve(gadget, args.duration, args.phase)
+        serve(gadget, args.duration, args.phase, session)
     except KeyboardInterrupt:
         log('probe_stopped')
     except Exception as error:
@@ -543,6 +588,12 @@ def main():
         gadget.stage = 'cleanup'
         signal.setitimer(signal.ITIMER_REAL, 20)
         try:
+            if session:
+                try:
+                    session.close()
+                except Exception as error:
+                    log('media_cleanup_error', error=str(error))
+                    status = 1
             if not gadget.close():
                 status = 1
         except Exception as error:

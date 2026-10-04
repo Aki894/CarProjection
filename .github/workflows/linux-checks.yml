@@ -1,0 +1,27 @@
+name: Linux CarLife MD checks
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'linux/**'
+      - '.github/workflows/linux-checks.yml'
+  pull_request:
+    paths:
+      - 'linux/**'
+      - '.github/workflows/linux-checks.yml'
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test media tools
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Validate scripts and protocol behavior
+        run: |
+          bash -n linux/run-h3-test.sh
+          python3 -m py_compile linux/*.py
+          python3 -m unittest discover -s linux -v
+          python3 linux/media_selftest.py

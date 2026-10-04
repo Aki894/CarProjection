@@ -113,7 +113,7 @@ class ProbeTests(unittest.TestCase):
             bulk = BulkIO(11, 12)
             bulk.enabled.set()
             try:
-                bulk.outgoing.put(b'abcdef')
+                bulk.outgoing.put_nowait(b'abcdef')
                 self.assertTrue(finished.wait(1))
             finally:
                 bulk.stop.set()
