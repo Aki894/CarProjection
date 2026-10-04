@@ -1,0 +1,75 @@
+name: Build WuKongPi H3 development firmware
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - firmware/wukongpi-h3/**
+      - .github/workflows/build-h3-firmware.yml
+permissions:
+  contents: read
+concurrency:
+  group: h3-firmware-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      ARMBIAN_SHA: b44a5a2cfc5114477e20fc8f6aaa38058860ab9f
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check firmware scripts
+        run: |
+          bash -n firmware/wukongpi-h3/userpatches/customize-image.sh
+          bash -n firmware/wukongpi-h3/userpatches/config-carlife-h3.conf
+          bash -n firmware/wukongpi-h3/userpatches/extensions/carlife-h3-tools.sh
+          bash -n firmware/wukongpi-h3/userpatches/overlay/carlife-board-check
+      - name: Check runner resources
+        run: |
+          # Disposable hosted runner only: firmware needs the disk occupied by SDKs.
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h
+          free -h
+          docker version
+      - name: Checkout pinned Armbian builder
+        uses: actions/checkout@v4
+        with:
+          repository: armbian/build
+          ref: b44a5a2cfc5114477e20fc8f6aaa38058860ab9f
+          path: armbian-build
+      - name: Prepare H3 image customization
+        run: |
+          mkdir -p armbian-build/userpatches
+          cp -a firmware/wukongpi-h3/userpatches/. armbian-build/userpatches/
+          printf 'Project=CarProjection\nProjectCommit=%s\nArmbianCommit=%s\nBoard=orangepizero (WuKongPi H3 compatible)\nPurpose=Hardware bring-up; no Linux CarPlay bridge yet\n' "$GITHUB_SHA" "$ARMBIAN_SHA" > armbian-build/userpatches/overlay/carlife-firmware-info
+      - name: Build minimal bootable TF image
+        working-directory: armbian-build
+        run: ./compile.sh docker carlife-h3 SHOW_LOG=yes SHARE_LOG=no
+      - name: Collect image, checksums and build manifest
+        run: |
+          mkdir -p firmware-output
+          find armbian-build/output/images -maxdepth 1 -type f \( -name '*.img.xz' -o -name '*.img.sha' -o -name '*.txt' \) -exec cp '{}' firmware-output/ \;
+          test "$(find firmware-output -name '*.img.xz' | wc -l)" -eq 1
+          cp firmware/wukongpi-h3/README.md firmware-output/README.md
+          cp armbian-build/userpatches/overlay/carlife-firmware-info firmware-output/build-manifest.txt
+          if test -d armbian-build/output/debs; then
+            find armbian-build/output/debs -type f -name '*.deb' -printf '%f\n' >> firmware-output/build-manifest.txt
+          fi
+          cd firmware-output
+          sha256sum -- *.img.xz > SHA256SUMS
+          xz -t -- *.img.xz
+      - name: Upload bootable H3 image
+        uses: actions/upload-artifact@v4
+        with:
+          name: WuKongPi-H3-development-image
+          path: firmware-output/
+          compression-level: 0
+          retention-days: 14
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: WuKongPi-H3-build-logs
+          path: armbian-build/output/logs/
+          if-no-files-found: ignore
+          retention-days: 7
