@@ -38,6 +38,8 @@ class ProbeTests(unittest.TestCase):
         gadget = SimpleNamespace(ep0=10, rx=11, tx=12, accessory=Mock(), bulk=None)
         reads = [event(0xc0, 51, length=2), event(0x40, 52, index=0, length=6),
                  b'Baidu\0', event(0x40, 53), b'', b'\0' * 8 + b'\x02\0\0\0',
+                 event(0xc0, 51, length=2), event(0x40, 52, index=1, length=8),
+                 b'CarLife\0', event(0x40, 53), b'',
                  ]
         captured = []
         def write(_fd, data):
@@ -46,7 +48,7 @@ class ProbeTests(unittest.TestCase):
         bulk = SimpleNamespace(enabled=threading.Event(), received=queue.Queue(),
                                outgoing=queue.Queue(), errors=queue.Queue())
         bulk.received.put(command(0x18001))
-        with patch('aoa_probe.time.monotonic', side_effect=[0, 0, 0, 0, 0, 121]), \
+        with patch('aoa_probe.time.monotonic', side_effect=[0] * 8 + [121]), \
                 patch('aoa_probe.select.select', return_value=([10], [], [])), \
                 patch('aoa_probe.os.read', side_effect=reads), \
                 patch('aoa_probe.os.write', side_effect=write) as writes, \
@@ -55,6 +57,7 @@ class ProbeTests(unittest.TestCase):
             serve(gadget, 120, 'session')
         gadget.accessory.assert_called_once()
         self.assertEqual(writes.call_args_list[0].args, (10, b'\x01\x00'))
+        self.assertEqual(captured, [(10, b'\x01\x00'), (10, b'\x01\x00')])
         self.assertEqual(bulk.outgoing.get_nowait(), command(0x10002, b'\x08\x01'))
 
     def test_bind_phase_never_reenumerates_or_starts_bulk(self):
@@ -177,6 +180,22 @@ class ProbeTests(unittest.TestCase):
                 Frames().feed(header)
         with self.assertRaises(ValueError):
             reply(1, struct.pack('>HHI', 5, 0, 0x18001))
+
+    def test_repeated_transport_header_is_reported_without_guessing_resync(self):
+        logger = Mock()
+        parser = Frames(logger)
+        header = struct.pack('>II', 1, 12)
+        parser.feed(header)
+        parser.feed(header)
+        with self.assertRaisesRegex(ValueError, 'payload length mismatch'):
+            parser.feed(b'\x00\x04\x00\x00')
+        details = logger.call_args.kwargs
+        self.assertEqual(logger.call_args.args, ('carlife_framing_error',))
+        self.assertEqual(details['transport_header_hex'], header.hex())
+        self.assertEqual(details['message_header_hex'], header.hex())
+        self.assertEqual(details['buffered_bytes'], 20)
+        # Keep the bytes intact for diagnosis; do not skip data or emit a reply.
+        self.assertEqual(len(parser.buffer), 20)
 
 
 if __name__ == '__main__':

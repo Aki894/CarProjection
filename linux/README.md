@@ -46,6 +46,24 @@ bash linux/run-h3-test.sh --fps 5 --gain 0.01
 只有系统仍稳定且上一轮清理成功时再运行下一轮；曾有失联，诊断入口仍保留。
 底层 UDC/内核/供电问题无法由握手代码绕过，发生失联先保存独立记录器日志。
 
+## 2026-10-06 实车结果与修复
+
+首次 Lexus 日志已收到 51/52/53，并在 18d1:2d00 模式 ENABLE；因此已验证
+原车 AOA 握手路径。之后 HU 再次 GET_PROTOCOL，旧代码因只处理 initial 模式而
+STALL；现在两种模式均响应版本查询和字符串请求，重复 START 完成 ACK，
+已在 accessory 模式时保持当前连接，不重复解绑。
+Android 参考实现见 [f_accessory.c](https://android.googlesource.com/kernel/common/+/0e3db17d01c9/drivers/usb/gadget/function/f_accessory.c)。
+
+本次在第一条消息处出现 `CarLife payload length mismatch`，还没有视频 INIT/START。
+当前日志不足以确定是报文布局、重发还是 USB 收包问题，不能视为音视频不兼容。
+新版 `carlife_framing_error` 仅记录外层 8 字节头、内层 8/12 字节头及长度，
+不输出媒体负载；遇到错误仍退出，不猜测同步位置或丢弃数据继续握手。
+`cleanup_stage: udc_unbound` 与 `cleanup_complete` 分别确认解绑返回与整轮清理结果。
+
+更新后仍运行 `bash linux/run-h3-test.sh`。请保留该轮 `session.jsonl`、
+`system.jsonl` 和 `recorder.stdout`；若会话输出停在 unbind_udc，这三份文件可区分
+输出截断、进程等待和系统失联。独立记录器默认运行 240 秒，待其结束再收集。
+
 ## 自定义视频与音频源
 
 ```bash

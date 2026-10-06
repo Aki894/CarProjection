@@ -19,6 +19,7 @@ import tempfile
 import threading
 import time
 from carlife_tx import TxQueue
+from carlife_wire import parse as parse_frame
 
 GADGET = Path('/sys/kernel/config/usb_gadget/carlife-probe')
 FFS = Path('/run/carlife-ffs')
@@ -67,8 +68,9 @@ def command(message, payload=b''):
 
 class Frames:
     """USB reads are chunks, not CarLife message boundaries."""
-    def __init__(self):
+    def __init__(self, logger=None):
         self.buffer = bytearray()
+        self.log = logger
 
     def feed(self, chunk):
         self.buffer.extend(chunk)
@@ -76,10 +78,23 @@ class Frames:
         while len(self.buffer) >= 8:
             channel, size = struct.unpack_from('>II', self.buffer)
             if channel not in range(1, 7) or size > MAX_FRAME or size < 8:
+                if self.log:
+                    self.log('carlife_framing_error', transport_header_hex=bytes(self.buffer[:8]).hex(),
+                             channel=channel, declared_bytes=size, buffered_bytes=len(self.buffer))
                 raise ValueError(f'invalid CarLife frame channel={channel} size={size}')
             if len(self.buffer) < 8 + size:
                 break
             frame = bytes(self.buffer[8:8 + size])
+            try:
+                parse_frame(channel, frame)
+            except ValueError as error:
+                if self.log:
+                    header_size = 8 if channel in (1, 6) else 12
+                    self.log('carlife_framing_error', error=str(error), channel=channel,
+                             transport_header_hex=bytes(self.buffer[:8]).hex(),
+                             message_header_hex=frame[:header_size].hex(),
+                             frame_bytes=size, buffered_bytes=len(self.buffer))
+                raise
             del self.buffer[:8 + size]
             result.append((channel, frame))
         return result
@@ -292,6 +307,7 @@ class Gadget:
             if errors:
                 log('cleanup_error', error=errors[-1], note='leaving gadget and descriptors intact; do not restart probe')
                 return False
+            log('cleanup_stage', stage='udc_unbound')
         if self.bulk and not self.bulk.join():
             log('cleanup_error', error='bulk worker still in kernel IO after unbind; leaving descriptors intact; do not restart probe')
             return False
@@ -319,6 +335,7 @@ class Gadget:
             self.lock.close()
         for error in errors:
             log('cleanup_error', error=error)
+        log('cleanup_complete', success=not errors)
         return not errors
 
 
@@ -406,7 +423,7 @@ def serve(gadget, duration, phase='bind', session=None):
     enabled = False
     accessory_enabled = False
     suspended = False
-    frames = Frames()
+    frames = Frames(log)
     seen = set()
     rx_bytes = 0
     rx_frames = 0
@@ -437,7 +454,7 @@ def serve(gadget, duration, phase='bind', session=None):
                         accessory_enabled = True
                 elif kind in (1, 3):
                     enabled = False
-                    frames = Frames()
+                    frames = Frames(log)
                     if gadget.bulk:
                         gadget.bulk.enabled.clear()
                     if mode == 'accessory' and accessory_enabled:
@@ -453,19 +470,22 @@ def serve(gadget, duration, phase='bind', session=None):
                     request_type, request, value, index, length = struct.unpack('<BBHHH', event[:8])
                     log('control_request', request_type=request_type, request=request,
                         index=index, length=length)
-                    if phase != 'bind' and mode == 'initial' and request_type == 0xc0 and request == 51 and value == 0 and index == 0 and length == 2:
+                    if phase != 'bind' and request_type == 0xc0 and request == 51 and value == 0 and index == 0 and length == 2:
                         os.write(gadget.ep0, b'\x01\x00')
-                        log('aoa_protocol', version=1)
-                    elif phase != 'bind' and mode == 'initial' and request_type == 0x40 and request == 52 and value == 0 and index < 6 and 0 < length <= 256:
+                        log('aoa_protocol', version=1, mode=mode)
+                    elif phase != 'bind' and request_type == 0x40 and request == 52 and value == 0 and index < 6 and 0 < length <= 256:
                         value_bytes = os.read(gadget.ep0, length)
                         seen.add(index)
                         log('aoa_identity_string', index=index, bytes=len(value_bytes))
-                    elif phase != 'bind' and mode == 'initial' and request_type == 0x40 and request == 53 and value == 0 and index == 0 and length == 0:
+                    elif phase != 'bind' and request_type == 0x40 and request == 53 and value == 0 and index == 0 and length == 0:
                         os.read(gadget.ep0, 0)  # Complete the control request before disconnect.
-                        log('aoa_start', received_string_indices=sorted(seen))
-                        enabled = False
-                        gadget.accessory()
-                        mode = 'accessory'
+                        log('aoa_start', received_string_indices=sorted(seen), mode=mode)
+                        if mode == 'initial':
+                            enabled = False
+                            gadget.accessory()
+                            mode = 'accessory'
+                        else:
+                            log('aoa_start_already_accessory')
                     else:
                         # Opposite-direction operation stalls unsupported requests.
                         try:
