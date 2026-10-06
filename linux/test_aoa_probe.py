@@ -124,6 +124,50 @@ class ProbeTests(unittest.TestCase):
                 self.assertTrue(bulk.join())
         self.assertEqual(b''.join(chunks), b'abcdef')
 
+    def test_bulk_reader_uses_selected_safe_packet_budget(self):
+        for budget in (512, 16384):
+            entered = threading.Event()
+            packet = command(0x18001, b'\x08\x01\x10\x00')
+            sizes = []
+            def read(_fd, size):
+                sizes.append(size)
+                entered.set()
+                return packet if len(sizes) == 1 else b''
+            with patch('aoa_probe.os.read', side_effect=read), patch('aoa_probe.log'):
+                bulk = BulkIO(11, 12, read_size=budget)
+                bulk.enabled.set()
+                try:
+                    received = bulk.received.get(timeout=1)
+                    self.assertEqual(Frames().feed(received), [(1, packet[8:])])
+                    self.assertEqual(sizes[0], budget)
+                finally:
+                    bulk.stop.set()
+                    bulk.enabled.set()
+                    self.assertTrue(bulk.join())
+
+    def test_bulk_write_modes_preserve_bytes_and_transfer_boundaries(self):
+        packet = command(0x10002, b'\x08\x01')
+        for mode, expected in [('split', [packet[:8], packet[8:]]), ('combined', [packet])]:
+            done = threading.Event()
+            writes = []
+            def write(_fd, data):
+                writes.append(data)
+                if b''.join(writes) == packet:
+                    done.set()
+                return len(data)
+            with patch('aoa_probe.os.read', return_value=b''), \
+                    patch('aoa_probe.os.write', side_effect=write), patch('aoa_probe.log'):
+                bulk = BulkIO(11, 12, write_mode=mode)
+                bulk.enabled.set()
+                try:
+                    bulk.outgoing.put_nowait(packet)
+                    self.assertTrue(done.wait(1))
+                    self.assertEqual(writes, expected)
+                finally:
+                    bulk.stop.set()
+                    bulk.enabled.set()
+                    self.assertTrue(bulk.join())
+
     def test_cleanup_does_not_close_live_worker_descriptors_or_restore_driver(self):
         gadget = Gadget(True)
         gadget.created = True

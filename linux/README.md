@@ -64,6 +64,44 @@ Android 参考实现见 [f_accessory.c](https://android.googlesource.com/kernel/
 `system.jsonl` 和 `recorder.stdout`；若会话输出停在 unbind_udc，这三份文件可区分
 输出截断、进程等待和系统失联。独立记录器默认运行 240 秒，待其结束再收集。
 
+### 第二轮：USB 收发路径对照
+
+21:35 实车日志证实内层位置出现相同外层头 `000000010000000c`；没有完成
+CarLife 版本握手。AOA 后的版本查询已正常回复，因此不能继续将该遗漏当作根因。
+重复头的源头仍待验证，不进行猜测性丢字节/重同步，也不添加不存在的外层 ACK。
+
+默认 USB 读取现在为 **512 字节**，发送为 **外层头/消息体分别 write**，后者与
+当前 Android `MsgProcess` 一致。读取仍使用支持拆包/合包的流解析器：不是把每次
+USB read 当一条消息。512 可容纳当前 bulk 描述符最大包；不要直接用 8 字节
+FunctionFS read 模拟 Java readFully。参考 v6.18 MUSB 的 PIO 接收代码会按请求
+剩余长度取 FIFO，再清 RXPKTRDY；较小缓冲区可能丢掉同一个 USB 包的尾部。
+512 与原 16384 两种预算均不小于最大包，新默认是可检验的兼容性尝试，
+尚不能声称已经修复本车机连接问题。
+
+```bash
+# 新默认：512-byte reads / split writes
+bash linux/run-h3-test.sh
+# 只对照读取预算，保持 split writes
+bash linux/run-h3-test.sh --usb-read-size 16384
+# 只对照发送边界，保持 512-byte reads
+bash linux/run-h3-test.sh --usb-write-mode combined
+# 完全回到上一版收发策略
+bash linux/run-h3-test.sh --usb-read-size 16384 --usb-write-mode combined
+```
+
+不用全部连续跑；优先测试新默认，上一轮有清理错误或失联须先恢复系统。
+`bulk_rx_chunk` 记录前 8 次收包长度，只对恰好 8 字节的块记录十六进制，
+可判断第三块是又一个外层头，还是迟到的消息头。
+系统记录器新增 `process_waits`，记录 Python/modprobe 的线程状态、wchan 和
+D 状态栈，并在读取控制器 sysfs 前落盘。记录器本身也可能等待 sysfs/SD 写入；
+没有 recorder_end 不能单独证明整板停止运行。
+
+本轮检查参考 Linux v6.18：[FunctionFS](https://github.com/torvalds/linux/blob/v6.18/drivers/usb/gadget/function/f_fs.c)、
+[MUSB gadget](https://github.com/torvalds/linux/blob/v6.18/drivers/usb/musb/musb_gadget.c)、
+[sunxi glue](https://github.com/torvalds/linux/blob/v6.18/drivers/usb/musb/sunxi.c)。
+sunxi 的 DMA 创建返回 NULL；不能套用其他 MUSB 平台的 DMA 短包补丁。
+实机是 Armbian 6.18.55，发行版补丁仍需在取得对应内核源码后核实。
+
 ## 自定义视频与音频源
 
 ```bash

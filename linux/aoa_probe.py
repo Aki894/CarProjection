@@ -345,8 +345,11 @@ class BulkIO:
     Keep it off the ep0/control loop. Unbind before joining/closing endpoints.
     This isolates userspace waits; it cannot repair a UDC/kernel lockup.
     """
-    def __init__(self, rx, tx):
+    def __init__(self, rx, tx, read_size=512, write_mode='split'):
+        if read_size not in (512, 16384) or write_mode not in ('split', 'combined'):
+            raise ValueError('invalid USB transport mode')
         self.rx, self.tx = rx, tx
+        self.read_size, self.write_mode = read_size, write_mode
         self.stop = threading.Event()
         self.enabled = threading.Event()
         self.received = queue.Queue(maxsize=16)
@@ -364,7 +367,9 @@ class BulkIO:
             if not self.enabled.wait(0.1) or self.stop.is_set():
                 continue
             try:
-                data = os.read(self.rx, 16384)
+                # A full maxpacket avoids truncating a coalesced host packet on
+                # MUSB PIO. Never request just an 8-byte CarLife header here.
+                data = os.read(self.rx, self.read_size)
                 if data:
                     while not self.stop.is_set():
                         try:
@@ -388,21 +393,27 @@ class BulkIO:
             except queue.Empty:
                 continue
             packet = data
-            while data and not self.stop.is_set():
-                if not self.enabled.wait(0.1) or self.stop.is_set():
-                    continue
-                try:
-                    count = os.write(self.tx, data)
-                    if count <= 0:
-                        raise OSError(errno.EIO, 'zero-length bulk write')
-                    data = data[count:]
-                except OSError as error:
-                    if error.errno in (errno.EAGAIN, errno.EINTR):
-                        self.stop.wait(0.1)
-                    else:
-                        self.errors.put(error)
-                        return
-            if not data:
+            # Android sends the outer header and message body separately.
+            # Preserve that USB transfer layout, without adding protocol ACKs.
+            parts = (packet[:8], packet[8:]) if self.write_mode == 'split' and len(packet) > 8 else (packet,)
+            for data in parts:
+                while data and not self.stop.is_set():
+                    if not self.enabled.wait(0.1) or self.stop.is_set():
+                        continue
+                    try:
+                        count = os.write(self.tx, data)
+                        if count <= 0:
+                            raise OSError(errno.EIO, 'zero-length bulk write')
+                        data = data[count:]
+                    except OSError as error:
+                        if error.errno in (errno.EAGAIN, errno.EINTR):
+                            self.stop.wait(0.1)
+                        else:
+                            self.errors.put(error)
+                            return
+                if self.stop.is_set():
+                    break
+            if not self.stop.is_set():
                 self.write_packets += 1
                 channel = struct.unpack_from('>I', packet)[0] if len(packet) >= 8 else 1
                 if channel == 2:
@@ -417,7 +428,7 @@ class BulkIO:
         return not any(thread.is_alive() for thread in self.threads)
 
 
-def serve(gadget, duration, phase='bind', session=None):
+def serve(gadget, duration, phase='bind', session=None, read_size=512, write_mode='split'):
     deadline = time.monotonic() + duration
     mode = 'initial'
     enabled = False
@@ -427,6 +438,7 @@ def serve(gadget, duration, phase='bind', session=None):
     seen = set()
     rx_bytes = 0
     rx_frames = 0
+    rx_chunks = 0
     last_heartbeat = -float('inf')
     event_names = {0: 'bind', 1: 'unbind', 2: 'enable', 3: 'disable',
                    4: 'setup', 5: 'suspend', 6: 'resume'}
@@ -499,8 +511,8 @@ def serve(gadget, duration, phase='bind', session=None):
         if phase != 'session' or mode != 'accessory' or not enabled or suspended:
             continue
         if gadget.bulk is None:
-            log('bulk_workers_start')
-            gadget.bulk = BulkIO(gadget.rx, gadget.tx)
+            log('bulk_workers_start', read_size=read_size, write_mode=write_mode)
+            gadget.bulk = BulkIO(gadget.rx, gadget.tx, read_size, write_mode)
         gadget.bulk.enabled.set()
         if not gadget.bulk.errors.empty():
             raise gadget.bulk.errors.get_nowait()
@@ -509,9 +521,16 @@ def serve(gadget, duration, phase='bind', session=None):
         except queue.Empty:
             chunk = b''
         if chunk:
+            rx_chunks += 1
             rx_bytes += len(chunk)
             if rx_bytes == len(chunk):
                 log('bulk_first_rx', bytes=len(chunk))
+            if rx_chunks <= 8:
+                # Exactly eight bytes can be the outer transport header; avoid
+                # dumping arbitrary message bodies or HU identity strings.
+                log('bulk_rx_chunk', number=rx_chunks, bytes=len(chunk),
+                    buffered_before=len(frames.buffer),
+                    eight_byte_chunk_hex=chunk.hex() if len(chunk) == 8 else None)
         for channel, frame in frames.feed(chunk):
             rx_frames += 1
             message = struct.unpack_from('>I', frame, 4)[0] if channel in (1, 6) else None
@@ -542,6 +561,10 @@ def main(default_phase='bind'):
     parser.add_argument('--phase', choices=('bind', 'aoa', 'session'), default=default_phase,
                         help='bind: enumeration only; aoa: switch only; session: full CarLife MD test')
     parser.add_argument('--log-file', help='append and fsync JSON logs directly to this file')
+    parser.add_argument('--usb-read-size', type=int, choices=(512, 16384), default=512,
+                        help='bulk read request size; 16384 selects the previous transport path')
+    parser.add_argument('--usb-write-mode', choices=('split', 'combined'), default='split',
+                        help='split outer header/body like Android, or previous combined writes')
     parser.add_argument('--video', choices=('pattern', 'off'), default='pattern')
     parser.add_argument('--video-file', help='video file encoded/scaled to HU size instead of test pattern')
     parser.add_argument('--copy-video', action='store_true', help='pass matching H.264 video-file through without encoding')
@@ -597,7 +620,7 @@ def main(default_phase='bind'):
         log('waiting_for_host', note='connect OTG data port to CarLife HU or a test USB host')
         gadget.stage = 'serve_control_loop'
         signal.setitimer(signal.ITIMER_REAL, args.duration + 5)
-        serve(gadget, args.duration, args.phase, session)
+        serve(gadget, args.duration, args.phase, session, args.usb_read_size, args.usb_write_mode)
     except KeyboardInterrupt:
         log('probe_stopped')
     except Exception as error:

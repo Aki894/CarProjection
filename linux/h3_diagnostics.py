@@ -18,6 +18,30 @@ def read(path):
         return str(error)
 
 
+def process_waits(proc=Path('/proc')):
+    """Bounded thread wait evidence for our USB processes; no command-line dump."""
+    result = []
+    for process in sorted(proc.iterdir()):
+        if not process.name.isdigit():
+            continue
+        name = read(process / 'comm').strip()
+        if name not in ('python3', 'modprobe') and not name.startswith('carlife'):
+            continue
+        try:
+            tasks = sorted((process / 'task').iterdir())[:16]
+        except OSError:
+            continue
+        for task in tasks:
+            status = read(task / 'status')
+            state = next((line for line in status.splitlines() if line.startswith('State:')), '')
+            result.append(dict(pid=int(process.name), tid=int(task.name), name=name,
+                               state=state, wchan=read(task / 'wchan').strip(),
+                               stack=read(task / 'stack')[:4096] if 'D (disk sleep)' in state else None))
+        if len(result) >= 64:
+            break
+    return result[:64]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True)
@@ -61,6 +85,10 @@ def main():
                 if now >= next_snapshot:
                     counters = {name: read('/proc/' + name) for name in
                                 ('uptime', 'stat', 'meminfo', 'interrupts', 'softirqs', 'net/dev')}
+                    # Persist process evidence before sysfs reads: a blocked
+                    # controller attribute must not hide the last wait stacks.
+                    record('process_waits', threads=process_waits(), uptime=counters['uptime'],
+                           next_stage='read_controller_attributes')
                     controllers = {str(path): read(path) for pattern in
                                    ('/sys/class/udc/*/state', '/sys/class/udc/*/current_speed',
                                     '/sys/class/thermal/thermal_zone*/temp')
