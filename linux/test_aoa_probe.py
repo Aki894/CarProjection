@@ -3,6 +3,7 @@ import subprocess
 import queue
 import threading
 import time
+import io
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -11,6 +12,24 @@ from aoa_probe import BulkIO, Frames, Gadget, command, descriptors, md_info, rep
 
 
 class ProbeTests(unittest.TestCase):
+    def test_logging_does_not_sync_sd_from_control_loop(self):
+        output = io.StringIO()
+        with patch('aoa_probe.LOG_FILE', output), patch('aoa_probe.os.fsync') as sync, \
+                patch('builtins.print'):
+            from aoa_probe import log
+            log('test', phase='control')
+        sync.assert_not_called()
+        self.assertIn('"event": "test"', output.getvalue())
+
+    def test_cleanup_leaves_usb_serial_disabled_unless_opted_in(self):
+        for restore in (False, True):
+            gadget = Gadget(True, restore_serial=restore)
+            gadget.serial_released = True
+            gadget.getty_was_active = True
+            with patch('aoa_probe.run') as run, patch('aoa_probe.log'):
+                self.assertTrue(gadget.close())
+            self.assertEqual(run.call_count, 2 if restore else 0)
+
     def test_kernel_stuck_child_does_not_cause_unbounded_timeout_wait(self):
         process = Mock(pid=43210)
         process.wait.side_effect = [subprocess.TimeoutExpired('modprobe', 15),

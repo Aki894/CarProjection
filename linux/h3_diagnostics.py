@@ -18,6 +18,13 @@ def read(path):
         return str(error)
 
 
+def readlink(path):
+    try:
+        return os.readlink(path)
+    except OSError:
+        return ''
+
+
 def process_waits(proc=Path('/proc')):
     """Bounded thread wait evidence for our USB processes; no command-line dump."""
     result = []
@@ -55,13 +62,16 @@ def main():
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, interrupt)
     fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    if os.environ.get('SUDO_UID') and os.environ.get('SUDO_GID'):
+        os.fchown(fd, int(os.environ['SUDO_UID']), int(os.environ['SUDO_GID']))
     kernel = None
     with os.fdopen(fd, 'w') as output:
         def record(event, **data):
             output.write(json.dumps(dict(time=time.strftime('%Y-%m-%dT%H:%M:%S%z'),
                                          event=event, **data), ensure_ascii=False) + '\n')
             output.flush()
-            os.fsync(output.fileno())
+            # Flushed page-cache logs avoid adding journal commit pressure
+            # to the SD card under test. Power loss may lose their final tail.
         record('recorder_start', duration=args.duration, uname=list(os.uname()),
                cmdline=read('/proc/cmdline'), consoles=read('/proc/consoles'),
                modules=read('/proc/modules'))
@@ -69,6 +79,19 @@ def main():
         record('boot_options', lines=[line for line in env.splitlines()
                if line.split('=', 1)[0] in ('overlays', 'user_overlays', 'fdtfile',
                                             'console', 'verbosity', 'extraargs')])
+        record('reset_evidence', boot_id=read('/proc/sys/kernel/random/boot_id').strip(),
+               panic_timeout=read('/proc/sys/kernel/panic').strip(),
+               watchdog={str(path): read(path) for pattern in
+                         ('/sys/class/watchdog/watchdog*/bootstatus',
+                          '/sys/class/watchdog/watchdog*/state',
+                          '/sys/class/watchdog/watchdog*/timeout',
+                          '/sys/class/watchdog/watchdog*/nowayout',
+                          '/sys/class/watchdog/watchdog*/identity',
+                          '/sys/class/watchdog/watchdog*/timeleft')
+                         for path in Path('/').glob(pattern.lstrip('/'))},
+               pid1_watchdog_fds=[str(path) for path in Path('/proc/1/fd').glob('*')
+                                 if 'watchdog' in readlink(path)],
+               pstore_files=[path.name for path in Path('/sys/fs/pstore').glob('*')])
         try:
             kernel = subprocess.Popen(['dmesg', '--follow', '--color=never'],
                                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,

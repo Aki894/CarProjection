@@ -120,7 +120,8 @@ def log(event, **values):
     if LOG_FILE:
         LOG_FILE.write(line + '\n')
         LOG_FILE.flush()
-        os.fsync(LOG_FILE.fileno())
+        # Do not wait for SD journal commits in the USB/control loop. Flush
+        # makes logs visible to readers; sudden power loss may lose cached tail.
     try:
         print(line, flush=True)
     except OSError as error:
@@ -191,8 +192,9 @@ def put(path, value):
 
 
 class Gadget:
-    def __init__(self, release_serial):
+    def __init__(self, release_serial, restore_serial=False):
         self.release_serial = release_serial
+        self.restore_serial = restore_serial
         self.serial_released = False
         self.created = False
         self.mounted = False
@@ -326,10 +328,12 @@ class Gadget:
                 if item.exists():
                     cleanup(item.rmdir)
             cleanup(GADGET.rmdir)
-        if self.serial_released:
+        if self.serial_released and self.restore_serial:
             cleanup(lambda: run('modprobe', 'g_serial'))
             log('usb_serial_restore', success=not errors)
-        if self.getty_was_active:
+        elif self.serial_released:
+            log('usb_serial_restore_skipped', note='leave UDC unbound; explicit --restore-usb-serial opts in')
+        if self.getty_was_active and self.restore_serial:
             cleanup(lambda: run('systemctl', 'start', 'serial-getty@ttyGS0.service', timeout=5))
         if self.lock:
             self.lock.close()
@@ -557,10 +561,12 @@ def main(default_phase='bind'):
     global LOG_FILE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--release-g-serial', action='store_true')
+    parser.add_argument('--restore-usb-serial', action='store_true',
+                        help='opt in to g_serial/getty restart after cleanup; default leaves UDC unbound')
     parser.add_argument('--duration', type=int, default=120)
     parser.add_argument('--phase', choices=('bind', 'aoa', 'session'), default=default_phase,
                         help='bind: enumeration only; aoa: switch only; session: full CarLife MD test')
-    parser.add_argument('--log-file', help='append and fsync JSON logs directly to this file')
+    parser.add_argument('--log-file', help='append and flush JSON logs without synchronous SD commits')
     parser.add_argument('--usb-read-size', type=int, choices=(512, 16384), default=512,
                         help='bulk read request size; 16384 selects the previous transport path')
     parser.add_argument('--usb-write-mode', choices=('split', 'combined'), default='split',
@@ -591,12 +597,14 @@ def main(default_phase='bind'):
         parser.error('--copy-video requires --video-file and enabled video')
     if args.log_file:
         fd = os.open(args.log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+        if os.environ.get('SUDO_UID') and os.environ.get('SUDO_GID'):
+            os.fchown(fd, int(os.environ['SUDO_UID']), int(os.environ['SUDO_GID']))
         LOG_FILE = os.fdopen(fd, 'a')
     def interrupt(*_):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, interrupt)
     signal.signal(signal.SIGHUP, signal.SIG_IGN if LOG_FILE else interrupt)
-    gadget = Gadget(args.release_g_serial)
+    gadget = Gadget(args.release_g_serial, args.restore_usb_serial)
     log('probe_start', duration=args.duration, phase=args.phase, release_g_serial=args.release_g_serial)
     def startup_timeout(*_):
         raise TimeoutError(f'USB probe timed out at {gadget.stage}')

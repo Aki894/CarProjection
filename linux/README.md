@@ -17,11 +17,13 @@ git -C ~/CarProjection pull --ff-only
 sudo apt-get update
 sudo apt-get install ffmpeg
 cd ~/CarProjection
-bash linux/run-h3-test.sh
+sudo bash linux/run-h3-test.sh
 ```
 
-不要用 sudo 运行整个 bash 入口；它内部只对 USB 和记录器提权，日志目录位于
-调用用户的 `~/carlife-tests/时间戳/`。先拔 OTG 数据线，保持网络 SSH。
+可直接用 sudo 运行整个 bash 入口；普通 bash 调用也会在入口一次提权，运行中
+不再询问密码。日志目录根据 SUDO_UID 查找原用户 home，位于原用户的
+`~/carlife-tests/时间戳-随机后缀/`；目录及文件创建时就归原用户所有，失败或
+重启也不需要等待脚本最后 chown。先拔 OTG 数据线，保持网络 SSH。
 脚本先运行单元测试与真实 H.264 编解码/直通自检，确认独立现场记录器 ready 后
 再启动 180 秒 CarLife 会话；看到 waiting_for_host 再接车机。每轮录像、声音和
 输入都已准备好，不需要测试到某一步才补相应代码。
@@ -96,6 +98,31 @@ bash linux/run-h3-test.sh --usb-read-size 16384 --usb-write-mode combined
 D 状态栈，并在读取控制器 sysfs 前落盘。记录器本身也可能等待 sysfs/SD 写入；
 没有 recorder_end 不能单独证明整板停止运行。
 
+### 第三轮：消除日志刷盘干扰与重启取证
+
+21:58 日志显示三个 8 字节块均为相同外层头，512 读取没有解决重复头。
+主进程先后等待 `jbd2_log_wait_commit`、`folio_wait_bit_common`，错误输出到
+input reset 之间约 15 秒。先前每行 fsync 会让协议线程等待 SD 日志提交；
+现在会话和记录器都只 flush，不逐行强制刷盘。突然掉电仍可能丢失缓存尾部，
+但避免诊断机制持续干扰 USB 控制时序。
+
+本轮 UDC 解绑、关闭 FFS、恢复 g_serial 已有成功记录；末尾停在重启 ttyGS0
+getty。脚本没有 reboot/shutdown/watchdog 喂狗或停止操作。内核报告 sunxi-wdt
+已启用、16 秒超时，只能列为复位嫌疑，不能据此排除供电/内核异常。
+默认清理现在保持 UDC 未绑定，不重新加载 g_serial/getty，以单独排除这段切换；
+确需恢复时用 `--restore-usb-serial` 显式选择。网络 SSH 不依赖 USB 串口。
+
+恢复后先收集只读复位现场，不改 USB、watchdog 或系统配置：
+
+```bash
+sudo bash linux/run-h3-test.sh --diagnostics-only
+```
+
+它运行 10 秒，记录 boot_id、panic 超时、watchdog sysfs/bootstatus/状态、PID1
+是否持有 watchdog 设备，以及 pstore 文件列表；不打开 /dev/watchdog，不会因
+诊断而启动它。bootstatus=0 或没有 pstore 不能保证排除 watchdog/panic。
+随后再用 `sudo bash linux/run-h3-test.sh` 进行一轮完整测试。
+
 本轮检查参考 Linux v6.18：[FunctionFS](https://github.com/torvalds/linux/blob/v6.18/drivers/usb/gadget/function/f_fs.c)、
 [MUSB gadget](https://github.com/torvalds/linux/blob/v6.18/drivers/usb/musb/musb_gadget.c)、
 [sunxi glue](https://github.com/torvalds/linux/blob/v6.18/drivers/usb/musb/sunxi.c)。
@@ -165,15 +192,17 @@ Device/MD 角色；车机承担 USB Host/HU 角色。
 内核不可中断等待不能靠 Python 计时器强制终止，应结合进程状态/内核日志诊断。
 如 `g_serial` 正被打开的 ttyGS0 占用，程序会拒绝卸载；请关闭该 USB 串口连接，
 用网络 SSH 重试。程序只操作自己的 gadget，拒绝解绑其他 configfs gadget。
-新版会暂停此前正在运行的 `serial-getty@ttyGS0.service`，退出时尝试恢复它；
+新版会暂停此前正在运行的 `serial-getty@ttyGS0.service`，仅在显式选择
+`--restore-usb-serial` 时于退出阶段恢复它；
 其他占用 ttyGS0 的进程会列出 PID/进程名，不自动杀掉。若 ttyGS0 是内核 console，
 拒绝在线切换，需要先更改启动配置。通过网络 SSH 测试，先拔掉 OTG 数据线。
 `modprobe -r g_serial` 仍可能因内核/UDC 阻塞：命令等待 15 秒，SIGKILL 后最多再
 等 2 秒。处于 D 状态的内核等待不能用信号强行解除；程序会报告子进程 PID。
 请另开网络 SSH，运行 `ps -C modprobe,python3,agetty -o pid,ppid,stat,wchan:32,comm`，
 再读取相应 `/proc/PID/stack` 和近期内核日志。存在未结束的卸载进程时，不重复启动。
-Ctrl+C、SIGTERM、异常及 120 秒到时都会尝试解绑/删除本程序 gadget，并恢复原先
-加载的 g_serial；若恢复失败会明确记录 `cleanup_error`，可以 `sudo modprobe g_serial`。
+Ctrl+C、SIGTERM、异常及到时都会尝试解绑/删除本程序 gadget。默认保留 UDC
+未绑定；显式选择恢复后，若恢复失败会记录 `cleanup_error`。需要串口时先拔车机线，
+再手动 `sudo modprobe g_serial`，必要时启动 `serial-getty@ttyGS0.service`。
 不在启动时更改网络、蓝牙、持久 USB 设置或自动启用此实验。
 
 依次寻找这些日志：
