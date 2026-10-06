@@ -25,10 +25,30 @@ mkdir -p "$task_home/carlife-tests"
 logs=$(mktemp -d "$task_home/carlife-tests/$(date +%Y%m%d-%H%M%S)-XXXXXX")
 chown "$task_uid:$task_gid" "$task_home/carlife-tests" "$logs"
 # Ownership must be correct before launch, even if the board later resets.
-for task_file in recorder.stdout session.jsonl; do
+for task_file in recorder.stdout session.jsonl sync.stdout; do
     touch "$logs/$task_file"
     chown "$task_uid:$task_gid" "$logs/$task_file"
 done
+sync_duration=250
+[[ $diagnostics_only == false ]] || sync_duration=15
+# Never wait for this process at exit: fsync can block on a failed SD card.
+# One process per run, finite normal lifetime; no restart or catch-up storm.
+nohup python3 -u "$root/log_sync.py" --interval 2 --duration "$sync_duration" \
+    "$logs/session.jsonl" "$logs/system.jsonl" "$logs/recorder.stdout" "$logs/sync.stdout" \
+    > "$logs/sync.stdout" 2>&1 < /dev/null &
+sync_ready=false
+for ((attempt=0; attempt<50; attempt++)); do
+    if grep -q 'Sync ready' "$logs/sync.stdout" 2>/dev/null; then
+        sync_ready=true
+        break
+    fi
+    sleep 0.1
+done
+if [[ $sync_ready != true ]]; then
+    cat "$logs/sync.stdout" >&2
+    echo 'Log sync worker did not start; USB was not changed.' >&2
+    exit 1
+fi
 if [[ $diagnostics_only == true ]]; then
     echo "Read-only reset diagnostics: $logs"
     python3 -u "$root/h3_diagnostics.py" --duration 10 --output "$logs/system.jsonl" \
