@@ -44,6 +44,12 @@ android {
                 signingConfig signingConfigs.fixedDebug
             }
         }
+        wukongpi {
+            initWith debug
+            matchingFallbacks = ['debug']
+            versionNameSuffix "-wukongpi.1"
+            signingConfig signingConfigs.fixedDebug
+        }
     }
 
     sourceSets {

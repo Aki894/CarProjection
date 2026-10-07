@@ -24,6 +24,11 @@ public final class CarLifeSessionService extends Service {
         else session.attachUi(activity, listener);
         return session;
     }
+    static synchronized String boardState() {
+        return "session=" + (session != null) + " usbConnected="
+                + (session != null && session.isUsbConnected())
+                + " descriptor=" + (descriptor != null);
+    }
     static synchronized boolean isOpen(android.hardware.usb.UsbAccessory next) {
         return descriptor != null && next != null && next.equals(accessory) && session != null && session.isUsbConnected();
     }

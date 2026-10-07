@@ -1,0 +1,41 @@
+name: Build WukongPi CarLife test APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [wukongpi-headless]
+    paths: ["app/**", "tools/**", ".github/workflows/build-wukongpi-apk.yml"]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install SDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Prepare existing test signing key
+        run: sed 's/\\n$//' keystore/carprojection-debug.keystore.b64 | base64 --decode > keystore/carprojection-debug.keystore
+      - name: Verify protocol regressions and build both variants
+        run: |
+          bash tools/check-audio.sh
+          chmod +x gradlew
+          ./gradlew :app:assembleWukongpi :app:lintWukongpi :app:assembleDebug --no-daemon --stacktrace
+      - name: Upload board APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CarProjection-wukongpi-apk
+          path: app/build/outputs/apk/wukongpi/app-wukongpi.apk
+          if-no-files-found: error
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CarProjection-wukongpi-lint
+          path: app/build/reports/lint-results-wukongpi.*
+          if-no-files-found: ignore
