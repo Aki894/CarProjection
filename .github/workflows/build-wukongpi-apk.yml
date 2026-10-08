@@ -28,6 +28,11 @@ jobs:
           bash tools/check-audio.sh
           chmod +x gradlew
           ./gradlew :app:assembleWukongpi :app:lintWukongpi :app:assembleDebug --no-daemon --stacktrace
+      - name: Inspect board manifest and signature
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print app/build/outputs/apk/wukongpi/app-wukongpi.apk > /tmp/board-manifest.xml
+          python3 tools/check-board-manifest.py /tmp/board-manifest.xml app/build/outputs/apk/wukongpi/app-wukongpi.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/wukongpi/app-wukongpi.apk
       - name: Upload board APK
         uses: actions/upload-artifact@v4
         with:
