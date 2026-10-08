@@ -46,9 +46,8 @@ public final class BoardControlActivity extends Activity {
                         + " model=" + device.getModel() + " permission=" + usb.hasPermission(device));
             }
             if ("start".equals(command)) {
-                startActivity(new Intent(this, MainActivity.class)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP));
-                Log.i(TAG, "MainActivity launch requested; USB permission remains required");
+                startForegroundService(new Intent(this, BoardSessionService.class).putExtra("command", "start"));
+                Log.i(TAG, "Board service requested without Activity; provisioning supplies USB permission");
             }
         } catch (RuntimeException error) {
             Log.e(TAG, "Board command failed", error);

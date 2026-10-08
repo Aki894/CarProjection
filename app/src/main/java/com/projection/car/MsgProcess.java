@@ -273,10 +273,10 @@ public class MsgProcess {
     void attachUi(Activity activity, InfoListener listener) { mUiActivity = new java.lang.ref.WeakReference<>(activity); mInfoListener = listener; refreshSize(); notifyAudioFeatureStatus(); }
     void detachUi(Activity activity) { if (mUiActivity.get() == activity) { mUiActivity.clear(); mInfoListener = null; } }
 
-    MsgProcess(Activity context, int bit, int frame, InfoListener infoListener) {
+    MsgProcess(Context context, int bit, int frame, InfoListener infoListener) {
 
         mContext = context.getApplicationContext();
-        mUiActivity = new java.lang.ref.WeakReference<>(context);
+        mUiActivity = new java.lang.ref.WeakReference<>(context instanceof Activity ? (Activity) context : null);
         mInfoListener = infoListener;
         mVideoBit = bit;
         mVideoFrame = frame;
