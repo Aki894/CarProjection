@@ -49,6 +49,10 @@ android {
             initWith debug
             matchingFallbacks = ['debug']
             versionNameSuffix "-wukongpi.2"
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro', 'proguard-wukongpi.pro'
+            ndk { abiFilters 'armeabi-v7a' }
             signingConfig signingConfigs.fixedDebug
         }
     }
