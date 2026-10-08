@@ -11,4 +11,5 @@ bridge=root.find('application/service[@'+a+'name="com.projection.car.CarPlayAudi
 assert bridge is not None and bridge.attrib[a+'permission']=='com.projection.car.permission.BOARD_CONTROL'
 with zipfile.ZipFile(sys.argv[2]) as z:
  assert all(not n.startswith('lib/') or n.startswith('lib/armeabi-v7a/') for n in z.namelist())
+ assert not any(n.endswith('.apk') for n in z.namelist())
 print('PASS: board service, signature-protected data bridge, ARM32 and no capture/accessibility/launcher components')
