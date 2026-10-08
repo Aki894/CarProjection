@@ -26,8 +26,10 @@ public final class BoardSessionService extends Service {
     }};
     @Override public void onCreate() {
         super.onCreate();
+        // Binding a freshly installed service must not make its lifetime depend on a Web request.
+        startForegroundService(new Intent(this,BoardSessionService.class));
         getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel("board_car","CarLife",NotificationManager.IMPORTANCE_LOW));
-        startForeground(101,new Notification.Builder(this,"board_car").setSmallIcon(android.R.drawable.stat_sys_data_usb)
+        startForeground(101,new Notification.Builder(this,"board_car").setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle("WuKong CarLife").setContentText("Background car bridge").setOngoing(true).build());
         requested=getSharedPreferences("set",0).getBoolean("board_requested",true);
         wake=getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"WuKong:CarLife");wake.setReferenceCounted(false);
